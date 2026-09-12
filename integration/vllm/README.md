@@ -39,6 +39,7 @@ settings. This is an argument fragment, not a complete Compose service:
 --max-model-len 262144
 --max-num-seqs 1
 --max-num-batched-tokens 2048
+--long-prefill-token-threshold 0
 --gpu-memory-utilization 0.95
 --limit-mm-per-prompt '{"image":1,"video":0}'
 --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
@@ -63,6 +64,36 @@ The adapter captures noncausal draft attention in a full CUDA Graph;
 look for `Capturing dflash2 CUDA graphs (FULL)` in the startup log.
 Switching the draft to stock FA2 with BF16 KV exceeded the measured rig's
 KV memory budget at 262144 context. The custom path retains FP8 KV.
+
+## Optional native FA2 prefill
+
+Build with `--prefill` and add these mounts and environment setting:
+
+```yaml
+volumes:
+  - ./fa2_prefill.py:/usr/local/lib/python3.12/dist-packages/fa2_prefill.py:ro
+  - ./paged_prefill.py:/usr/local/lib/python3.12/dist-packages/paged_prefill.py:ro
+  - ./build-prefill/fa2_fp8kv_prefill.so:/opt/fa2-fp8kv/fa2_fp8kv_prefill.so:ro
+environment:
+  FA2_FP8KV_PREFILL: "1"
+```
+
+The flag defaults to `0`, preserving the paged path for existing installs.
+When enabled, single-request causal prefill above 64 query tokens unpacks
+each KV block once per attention call and calls native FlashAttention-2.
+The 65536-token blocks are handled one KV head at a time; at D256, each
+unpacked K/V block needs at most 64 MiB, plus attention outputs and merge
+state. FP32 merging combines prefix blocks with a separate causal query
+tail. These temporary buffers are released after the call; persistent
+KV remains FP8. Decode and noncausal draft attention keep the paged FA2 path.
+Workspace OOM falls back to paged FP8 FA2 with query chunks of at most 2048.
+No FlashInfer attention kernel is used by this option.
+
+The measured Qwen/DFlash2 profile used a 2048-token batch budget, no extra
+long-prefill cap, and a fixed KV pool of 6335076762 bytes per GPU.
+The 4096-token budget failed in an MLP allocation even after trying proactive
+allocator garbage collection; its throughput summaries are invalid.
+Keep the tested memory contract when reproducing these measurements.
 
 `FLASHINFER` remains the registry enum used to select the cache layout.
 The overlay routes normal decoder attention, including MTP attention,

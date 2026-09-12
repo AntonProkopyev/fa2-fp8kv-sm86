@@ -103,6 +103,68 @@ A separate image request with 4070 image tokens recovered all fixture
 facts in 3.789 seconds. Large image plus 261K text was not tested together.
 Full 150-scenario quality, complete ON quality and soak are not claimed.
 
-This is still a decode-oriented implementation. Its current GQA packing
-does not cover large prefill query blocks; input throughput needs separate
-measurement and optimization.
+The default paged path is tuned for decode. Its GQA packing does not cover
+large prefill query blocks. The optional prefill path below addresses that
+workload separately while keeping all attention on FA2.
+
+## Optional bounded-unpacking FA2 prefill
+
+The selected Qwen3.8-27B FP8/DFlash2 profile keeps the preceding hardware,
+weights, KV format, context and vision settings. It enables
+`FA2_FP8KV_PREFILL=1`, uses a 2048-token batch budget, and sets
+`long_prefill_token_threshold=0`. The earlier profile's threshold 1024
+limited actual prefill despite its 2048 batch budget.
+
+The same seeded, cache-busting prompts were used for all three arms with
+the repository prefill harness: one warmup per depth, three measured short
+requests and one measured long request. Measured token counts were
+10003/10003/9646 and 93331. The warmup output cap was 16; measured output
+cap 128. Rates use client-observed time to first token.
+
+| Approximate input depth | Paged FA2, cap 1024 | Paged FA2, no extra cap | Optional FA2 prefill |
+|---|---:|---:|---:|
+| 10K tokens | 1711.50 ± 7.30 | 1748.58 ± 4.58 | 1794.50 ± 3.69 |
+| 90K tokens | 1063.79 | 1153.93 | 1399.13 |
+
+The 90K result is one measured probe per arm, not a statistical confidence
+claim. All expected requests completed and input counts matched.
+
+A separate 261000-token input recovered the control string in 263.046 s
+(11 output tokens), versus the previous 428.1 s: about 1.6x faster.
+The old timer polled at 5 s intervals; the new timer records completion in
+the request thread. These are full request wall times for pretokenized
+input, not kernel time or a strict TTFT comparison. The new observed input
+rate is approximately 992 tokens/s, below the 1500–2000 target at this depth.
+
+Canonical decode 3+5 remained healthy: narrative 100.44 ± 5.31 tokens/s,
+code 192.64 ± 9.28; wall rates 99.10 ± 5.20 and 181.09 ± 7.93.
+Quality OFF remained 62/75, with the same per-pack totals as the preceding
+Qwen profile. Separate 4 MP vision passed in 3.676 s.
+
+Combined 259872-token text/image input, including 4070 image tokens, passed
+all fixture facts in 263.566 s. Two full-history followups at 259934/259984
+tokens passed in 10.158/10.111 s with prefix-cache reuse. The fixture's image
+had already been exercised by the preliminary image request.
+Peak VRAM across final checks was 23916 MiB on each GPU; minimum physical
+free memory was 211 MiB per GPU. Sampling was 1 s for the main checks and 500 ms
+for the combined image/context test. Shorter peaks may be missed.
+
+The 4096-token batch and an allocator-GC variant both failed with CUDA OOM
+in an MLP allocation. Their partial throughput summaries are invalid and
+are excluded. The selected profile retains 2048; no context or vision
+reduction was used to pass validation.
+
+Matched per-operation 3+5 timings at Q=1648, Hq=12, Hkv=2, D=256, including
+unpacking and merging:
+
+| KV length | Paged FP8 FA2 | Bounded unpacking + native FA2 |
+|---|---:|---:|
+| 32768 | 21.15 ms | 11.47 ms |
+| 131072 | 84.87 ms | 47.92 ms |
+| 261000 | 172.23 ms | 92.81 ms |
+
+Unpacking matched the BF16 oracle bitwise for every finite E4M3 encoding.
+Six attention cases matched an FP32 reference within the declared tolerance,
+including Q=4096 and K=262143; the paged-query fallback passed the same cases.
+Full 150-scenario quality, complete ON quality and soak remain untested for
+this optional profile.

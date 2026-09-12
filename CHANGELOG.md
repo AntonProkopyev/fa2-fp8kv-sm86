@@ -15,3 +15,8 @@
   four KV heads at D128, including noncausal window 2048 draft attention
   and full draft CUDA Graphs. Record the Qwen3.8-27B FP8/DFlash2 model
   comparison, context check, medium quality and large-image check.
+- Add opt-in `FA2_FP8KV_PREFILL=1`: bounded FP8 KV unpacking, native FA2
+  BF16 attention, FP32 merging and a paged-query fallback on workspace OOM.
+  Build its operator with `build.py --prefill`. FP8 storage and FA2 decode
+  remain unchanged. Record successful numerical checks and model prefill
+  measurements; reject the 4096-token batch variants that failed with OOM.

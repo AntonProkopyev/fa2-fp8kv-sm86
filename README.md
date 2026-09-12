@@ -42,11 +42,15 @@ docker run --rm --runtime runc \
   -e NVIDIA_VISIBLE_DEVICES=void -e MAX_JOBS=2 -e TORCH_CUDA_ARCH_LIST=8.6 \
   -v "$PWD:/work" -w /work --entrypoint python3 \
   vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967 \
-  build.py --pipeline
+  build.py --pipeline --prefill
 ```
 
 The output is `build-pipeline/fa2_fp8kv.so`; the operator namespace is
 `torch.ops.fa2_fp8kv`.
+`--prefill` also builds `build-prefill/fa2_fp8kv_prefill.so` for the optional
+bounded KV unpacking path. It keeps persistent KV in FP8 and runs attention
+through native FA2 with temporary BF16 inputs. Enable it explicitly using
+the integration instructions below.
 For a compatible local CUDA/PyTorch environment, `bash setup.sh` fetches
 the dependency and builds the same extension. `build.py --help` lists
 header-path overrides. Set `TORCH_CUDA_ARCH_LIST=8.6` explicitly in Docker:
@@ -65,11 +69,14 @@ docker run --rm --gpus all --ipc host \
     python3 bench.py --library build-pipeline/fa2_fp8kv.so --check-only
     python3 check_replay.py build-pipeline/fa2_fp8kv.so
     python3 check_window.py build-pipeline/fa2_fp8kv.so
-    python3 check_full.py --library build-pipeline/fa2_fp8kv.so --full'
+    python3 check_full.py --library build-pipeline/fa2_fp8kv.so --full
+    python3 check_prefill.py build-prefill/fa2_fp8kv_prefill.so --paged-library build-pipeline/fa2_fp8kv.so'
 ```
 
 For kernel timings, run `bench.py` with the same `--library` argument and
 omit `--check-only`. These timings are not model tokens per second.
+`bench_prefill.py build-pipeline/fa2_fp8kv.so build-prefill/fa2_fp8kv_prefill.so`
+compares complete prefill operations, including unpacking and FP32 merging.
 Development results are recorded in [BENCHMARKS.md](BENCHMARKS.md);
 publication does not imply a fresh GPU run of the packaged source.
 

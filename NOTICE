@@ -19,3 +19,7 @@ FP8 staging, and CUDA Graph compatible vLLM metadata handling.
 
 CUTLASS and FlashInfer are external build dependencies with their own
 licenses. They are not relicensed by this repository.
+
+The bounded prefill unpacking approach was informed by 1Cat-vLLM's public
+long-context prefill reports, including 1CatAI/1Cat-vLLM PR #212. This
+implementation uses a local SM86 gather operation and vLLM's native FA2.

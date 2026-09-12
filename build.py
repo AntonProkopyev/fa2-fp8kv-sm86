@@ -8,6 +8,7 @@ from torch.utils.cpp_extension import load
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--pipeline", action="store_true")
+parser.add_argument("--prefill", action="store_true", help="Also build bounded KV unpacking for native FA2 prefill")
 parser.add_argument("--cutlass-include", type=Path,
                     default=Path(os.environ.get("CUTLASS_PATH", Path(__file__).resolve().parent / "third_party/cutlass/include")))
 parser.add_argument("--flashinfer-include", type=Path)
@@ -39,3 +40,9 @@ print(load(
         f"-DFA2_FP8KV_PIPELINE={int(args.pipeline)}"],
     build_directory=str(build), is_python_module=False, verbose=True,
 ))
+if args.prefill:
+    prefill_build = source / "build-prefill"
+    prefill_build.mkdir(exist_ok=True)
+    print(load(name="fa2_fp8kv_prefill", sources=[str(source / "prefill.cu")],
+               extra_cuda_cflags=["-O3", "-std=c++17", "-lineinfo"],
+               build_directory=str(prefill_build), is_python_module=False, verbose=True))

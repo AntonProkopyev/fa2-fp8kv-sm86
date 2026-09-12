@@ -2521,6 +2521,13 @@ def _copy_page_indices_kernel(
 import os as _fa2_os
 
 torch.ops.load_library(_fa2_os.environ.get("FA2_FP8KV_LIBRARY", "/opt/fa2-fp8kv/fa2_fp8kv.so"))
+_FA2_PREFILL_ENABLED = _fa2_os.environ.get("FA2_FP8KV_PREFILL", "0") == "1"
+if _FA2_PREFILL_ENABLED:
+    from fa2_prefill import Fa2Prefill
+    from paged_prefill import PagedPrefill
+    torch.ops.load_library(_fa2_os.environ.get("FA2_FP8KV_PREFILL_LIBRARY", "/opt/fa2-fp8kv/fa2_fp8kv_prefill.so"))
+    _fa2_prefill = Fa2Prefill()
+    _fa2_paged_prefill = PagedPrefill()
 _FA2_SPLITS = int(_fa2_os.environ.get("FA2_FP8KV_SPLITS", "128"))
 if not 1 <= _FA2_SPLITS <= 128:
     raise ValueError("FA2_FP8KV_SPLITS must be between 1 and 128")
@@ -2533,6 +2540,7 @@ class Fa2Fp8KvMetadata(FlashInferMetadata):
     fa2_block_table: torch.Tensor
     fa2_max_query_len: int
     fa2_max_model_len: int
+    fa2_prefill_context_length: int
 
 
 class Fa2Fp8KvMetadataBuilder(FlashInferMetadataBuilder):
@@ -2554,6 +2562,10 @@ class Fa2Fp8KvMetadataBuilder(FlashInferMetadataBuilder):
         actual = int(starts[-1].item())
         decoded = int(starts[num_decodes].item())
         max_query = int((starts[1:] - starts[:-1]).max().item()) if common.num_reqs else 0
+        prefill_context = 0
+        if (common.causal and max_query > 64 and common.num_reqs == 1
+                and common.seq_lens_cpu_upper_bound is not None):
+            prefill_context = int(common.seq_lens_cpu_upper_bound[0].item())
         return Fa2Fp8KvMetadata(
             num_actual_tokens=actual, slot_mapping=common.slot_mapping,
             q_data_type_prefill=self.q_data_type_prefill,
@@ -2566,6 +2578,7 @@ class Fa2Fp8KvMetadataBuilder(FlashInferMetadataBuilder):
             fa2_block_table=common.block_table_tensor[:common.num_reqs],
             fa2_max_query_len=max_query,
             fa2_max_model_len=self.model_config.max_model_len,
+            fa2_prefill_context_length=prefill_context,
         )
 
     def use_cascade_attention(self, *args, **kwargs):
@@ -2594,6 +2607,21 @@ class Fa2Fp8KvImpl(FlashInferImpl):
         )
         keys, values = cache.split(self.head_size, dim=-1)
         max_query = attn_metadata.fa2_max_query_len
+        if (_FA2_PREFILL_ENABLED and attn_metadata.fa2_prefill_context_length >= max_query > 64
+                and attn_metadata.causal and self.window_left == -1
+                and not torch.cuda.is_current_stream_capturing()):
+            try:
+                _fa2_prefill.forward(query[:count], keys, values,
+                    attn_metadata.fa2_block_table, layer._k_scale, layer._v_scale,
+                    attn_metadata.fa2_prefill_context_length, self.scale, output[:count])
+                logger.info_once("FA2 prefill uses bounded FP8-to-BF16 unpacking and native FA2 attention")
+                return output
+            except torch.OutOfMemoryError:
+                logger.warning_once("FA2 prefill workspace unavailable; using paged FP8 FA2")
+            _fa2_paged_prefill.forward(query[:count], keys, values,
+                attn_metadata.fa2_block_table, layer._k_scale, layer._v_scale,
+                attn_metadata.fa2_prefill_context_length, self.scale, output[:count])
+            return output
         grouped = (attn_metadata.causal and self.window_left == -1
                    and max_query * (query.shape[1] // self.num_kv_heads) <= 64)
         # Split count must remain fixed in a full CUDA Graph. Sequence lengths
