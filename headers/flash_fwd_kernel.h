@@ -888,6 +888,26 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
     const float alibi_slope = !Has_alibi ? 0.0f : reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh] / params.scale_softmax;
     FLASH_NAMESPACE::Mask<Is_causal, Is_local, Has_alibi> mask(binfo.actual_seqlen_k, binfo.actual_seqlen_q / params.query_group_size, params.window_size_left, params.window_size_right, alibi_slope, params.query_group_size);
+    // A boundary tile can include pages discarded by sliding-window eviction.
+    // Masking scores alone is insufficient: zero probability times NaN V is NaN.
+    auto clear_window_values = [&]() {
+        if constexpr (Is_local) {
+            const int first_query = m_block * kBlockM / params.query_group_size;
+            const int last_query = min((m_block + 1) * kBlockM, binfo.actual_seqlen_q)
+                / params.query_group_size - 1;
+            const int shift = binfo.actual_seqlen_k - binfo.actual_seqlen_q / params.query_group_size;
+            const int first_key = first_query + shift - params.window_size_left;
+            const int last_key = last_query + shift + params.window_size_right;
+            #pragma unroll
+            for (int row = 0; row < size<1>(tVsV); ++row) {
+                const int key = n_block * kBlockN + get<0>(tKVcKV(0, row, 0));
+                if (key < first_key || key > last_key) {
+                    clear(tVsV(_, row, _));
+                }
+            }
+            __syncthreads();
+        }
+    };
 
     // For performance reason, we separate out two kinds of iterations:
     // those that need masking on S, and those that don't.
@@ -951,6 +971,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 #endif
         // __syncthreads();
 
+        clear_window_values();
         if (n_block > n_block_min) {
             // Advance gK
             if (block_table == nullptr) {
@@ -1021,6 +1042,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         FLASH_NAMESPACE::copy<true, Is_even_K>(gmem_tiled_copy_KV, tVsVLoad, tVsV, tKVcKV, tKVpKV, 0, v_descale);
         __syncthreads();
 #endif
+        clear_window_values();
         if (n_block > n_block_min) {
             // Advance gK
             if (block_table == nullptr) {

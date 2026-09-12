@@ -63,6 +63,7 @@ docker run --rm --gpus all --ipc host \
   -lc 'set -e
     python3 bench.py --library build-pipeline/fa2_fp8kv.so --check-only
     python3 check_replay.py build-pipeline/fa2_fp8kv.so
+    python3 check_window.py build-pipeline/fa2_fp8kv.so
     python3 check_full.py --library build-pipeline/fa2_fp8kv.so --full'
 ```
 
