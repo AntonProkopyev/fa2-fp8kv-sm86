@@ -1,4 +1,4 @@
-"""Numerics and matched CUDA-graph timings for Ornith's per-rank attention."""
+"""Numerics and matched CUDA-graph timings for paged FP8 KV attention."""
 
 import argparse
 import functools
@@ -95,9 +95,9 @@ with torch.inference_mode():
         if args.baseline_library:
             implementations.append(("baseline", torch.ops.qwen38_fa2_fp8.forward, False))
         if args.library:
-            implementations.append(("candidate_unpacked", torch.ops.ornith_fa2_fp8.forward, False))
+            implementations.append(("candidate_unpacked", torch.ops.fa2_fp8kv.forward, False))
             if query_len * heads <= 64:
-                implementations.append(("candidate_gqa", torch.ops.ornith_fa2_fp8.forward, True))
+                implementations.append(("candidate_gqa", torch.ops.fa2_fp8kv.forward, True))
         row = {"query_len": query_len, "kv_len": length, "head_dim": dim,
                "query_heads": heads, "kv_heads": kv_heads, "dtype": "fp8_e4m3",
                "kv_scales": [k_factor, v_factor]}

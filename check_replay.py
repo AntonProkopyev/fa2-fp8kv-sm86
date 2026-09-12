@@ -30,14 +30,14 @@ with torch.inference_mode():
             guarded = torch.full((7, 2, 8, 256), 11, device="cuda", dtype=torch.bfloat16)
             output = guarded[1:-1, 0]
             for _ in range(3):
-                torch.ops.ornith_fa2_fp8.forward(
+                torch.ops.fa2_fp8kv.forward(
                     query, keys, values, output, cu_q, seq_k, table, k_scale, v_scale,
                     4, 48, True, -1, -1, 1 / 16, splits, grouped,
                 )
             torch.cuda.synchronize()
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
-                _, captured_lse = torch.ops.ornith_fa2_fp8.forward(
+                _, captured_lse = torch.ops.fa2_fp8kv.forward(
                     query, keys, values, output, cu_q, seq_k, table, k_scale, v_scale,
                     4, 48, True, -1, -1, 1 / 16, splits, grouped,
                 )

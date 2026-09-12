@@ -11,43 +11,43 @@
 #include <tuple>
 #include <flashinfer/vec_dtypes.cuh>
 
-#define FLASH_NAMESPACE ornith_fa2
-namespace ornith_fa2 {}
-namespace flash = ornith_fa2;
+#define FLASH_NAMESPACE fa2_fp8kv_kernel
+namespace fa2_fp8kv_kernel {}
+namespace flash = fa2_fp8kv_kernel;
 #include "flash_fwd_launch_template.h"
 
-namespace ornith {
+namespace fa2_fp8kv {
 
 template<int HeadDim>
 struct Fp8Traits : Flash_fwd_kernel_traits<HeadDim, 64, (HeadDim == 256 ? 32 : 64), 4, false, false, cutlass::bfloat16_t> {
     using Base = Flash_fwd_kernel_traits<HeadDim, 64, (HeadDim == 256 ? 32 : 64), 4, false, false, cutlass::bfloat16_t>;
     using ElementKV = cutlass::float_e4m3_t;
     static constexpr int kBaseSmemSize = Base::kSmemSize;
-    static constexpr int kSmemSize = kBaseSmemSize + (ORNITH_FP8_PIPELINE
+    static constexpr int kSmemSize = kBaseSmemSize + (FA2_FP8KV_PIPELINE
         ? 2 * cute::size(typename Base::SmemLayoutKV{}) * sizeof(ElementKV) : 0);
 };
 
 template<int HeadDim, bool Causal, bool Local, bool Split>
-void launch(ornith_fa2::Flash_fwd_params& params, cudaStream_t stream) {
+void launch(fa2_fp8kv_kernel::Flash_fwd_params& params, cudaStream_t stream) {
     using Traits = Fp8Traits<HeadDim>;
     const dim3 grid((params.seqlen_q + 63) / 64,
                    Split ? params.num_splits : params.b,
                    Split ? params.b * params.h : params.h);
-    auto kernel = ornith_fa2::flash_fwd_splitkv_kernel<
+    auto kernel = fa2_fp8kv_kernel::flash_fwd_splitkv_kernel<
         Traits, Causal, Local, false, false, true, false, Split, false>;
     C10_CUDA_CHECK(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, Traits::kSmemSize));
     kernel<<<grid, Traits::kNThreads, Traits::kSmemSize, stream>>>(params);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     if constexpr (Split) {
         const dim3 combine((params.b * params.h * params.seqlen_q + 3) / 4);
-        ornith_fa2::flash_fwd_splitkv_combine_kernel<Traits, 4, 7, true>
+        fa2_fp8kv_kernel::flash_fwd_splitkv_combine_kernel<Traits, 4, 7, true>
             <<<combine, Traits::kNThreads, 0, stream>>>(params);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 }
 
 template<int HeadDim, bool Split>
-void dispatch(ornith_fa2::Flash_fwd_params& params, cudaStream_t stream) {
+void dispatch(fa2_fp8kv_kernel::Flash_fwd_params& params, cudaStream_t stream) {
     if (params.is_causal) {
         launch<HeadDim, true, false, Split>(params, stream);
     } else if (params.window_size_left >= 0 || params.window_size_right >= 0) {
@@ -119,7 +119,7 @@ std::tuple<at::Tensor, at::Tensor> forward(
                 "GQA packing currently supports one causal query tile");
     const int kernel_heads = heads / groups;
     const int kernel_max_q = max_q * groups;
-    // Ornith has one KV head per TP rank: both reshapes are zero-copy there.
+    // Both reshapes are zero-copy when there is one KV head per rank.
     const auto kernel_q = groups == 1 ? q : q.reshape({q.size(0), kv_heads, groups, head_dim})
         .permute({0, 2, 1, 3}).contiguous().reshape({q.size(0) * groups, kv_heads, head_dim});
     const bool packed_output_view = kv_heads == 1 && out.is_contiguous();
@@ -127,7 +127,7 @@ std::tuple<at::Tensor, at::Tensor> forward(
         ? out.reshape({q.size(0) * groups, kv_heads, head_dim}) : at::empty_like(kernel_q));
     const auto kernel_cu_q = groups == 1 ? cu_q : cu_q * groups;
     auto lse = at::empty({kernel_heads, kernel_q.size(0)}, q.options().dtype(at::kFloat));
-    ornith_fa2::Flash_fwd_params params{};
+    fa2_fp8kv_kernel::Flash_fwd_params params{};
     params.q_ptr = kernel_q.data_ptr(); params.k_ptr = k.data_ptr(); params.v_ptr = v.data_ptr();
     params.o_ptr = kernel_out.data_ptr(); params.softmax_lse_ptr = lse.data_ptr();
     params.q_row_stride = kernel_q.stride(0); params.q_head_stride = kernel_q.stride(1);
@@ -177,11 +177,11 @@ std::tuple<at::Tensor, at::Tensor> forward(
     }
     return {out, lse};
 }
-}  // namespace ornith
+}  // namespace fa2_fp8kv
 
-TORCH_LIBRARY(ornith_fa2_fp8, m) {
+TORCH_LIBRARY(fa2_fp8kv, m) {
     m.def("forward(Tensor q, Tensor k, Tensor v, Tensor(a!) out, Tensor cu_q, Tensor seq_k, Tensor table, Tensor k_scale, Tensor v_scale, int max_q, int max_k, bool causal, int window_left, int window_right, float softmax_scale, int splits=0, bool pack_gqa=False) -> (Tensor(a!), Tensor)");
 }
-TORCH_LIBRARY_IMPL(ornith_fa2_fp8, CUDA, m) {
-    m.impl("forward", &ornith::forward);
+TORCH_LIBRARY_IMPL(fa2_fp8kv, CUDA, m) {
+    m.impl("forward", &fa2_fp8kv::forward);
 }

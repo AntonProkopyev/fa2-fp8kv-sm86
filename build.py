@@ -27,7 +27,7 @@ os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.6")
 build = source / ("build-pipeline" if args.pipeline else "build-gqa")
 build.mkdir(exist_ok=True)
 print(load(
-    name="ornith_fa2_fp8",
+    name="fa2_fp8kv",
     sources=[str(source / "fp8_attn.cu")],
     extra_include_paths=[str(source / "headers"), str(args.cutlass_include.resolve()),
                          str(flashinfer_include.resolve())],
@@ -36,6 +36,6 @@ print(load(
         "-DFLASHATTENTION_DISABLE_SOFTCAP", "-lineinfo",
         "-U__CUDA_NO_HALF_OPERATORS__", "-U__CUDA_NO_HALF_CONVERSIONS__",
         "-U__CUDA_NO_BFLOAT16_CONVERSIONS__", "-U__CUDA_NO_HALF2_OPERATORS__",
-        f"-DORNITH_FP8_PIPELINE={int(args.pipeline)}"],
+        f"-DFA2_FP8KV_PIPELINE={int(args.pipeline)}"],
     build_directory=str(build), is_python_module=False, verbose=True,
 ))

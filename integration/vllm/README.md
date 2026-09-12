@@ -20,10 +20,10 @@ your pinned vLLM container, resolving source paths from the repository root:
 ```yaml
 volumes:
   - ./integration/vllm/flashinfer.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/backends/flashinfer.py:ro
-  - ./build-pipeline/ornith_fa2_fp8.so:/opt/ornith-fa2/ornith_fa2_fp8.so:ro
+  - ./build-pipeline/fa2_fp8kv.so:/opt/fa2-fp8kv/fa2_fp8kv.so:ro
 environment:
-  FA2_FP8KV_LIBRARY: /opt/ornith-fa2/ornith_fa2_fp8.so
-  ORNITH_FA2_SPLITS: "128"
+  FA2_FP8KV_LIBRARY: /opt/fa2-fp8kv/fa2_fp8kv.so
+  FA2_FP8KV_SPLITS: "128"
 ```
 
 Use these serving arguments with your model path and existing service
@@ -52,7 +52,7 @@ interconnect instead of copying it to an NVLink system.
 The overlay routes normal decoder attention, including MTP attention,
 through the FA2 extension. It does not replace the model's Gated DeltaNet
 or vision encoder kernels. Confirm the startup log contains
-`ORNITH FA2 native GQA/async backend enabled`.
+`FA2 FP8 KV native GQA/async backend enabled`.
 
 The 262144-token setting was checked with a 261000-token input; it does
 not guarantee that every multimodal workload fits. See the root

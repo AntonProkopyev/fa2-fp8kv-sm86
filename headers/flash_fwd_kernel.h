@@ -640,7 +640,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
     Tensor tVgV = make_tensor(tVgV_.data(), reshape_thread_tile(tVgV_.layout()));
     Tensor tVsV = make_tensor(tVsV_.data(), reshape_thread_tile(tVsV_.layout()));
 
-#if ORNITH_FP8_PIPELINE
+#if FA2_FP8KV_PIPELINE
     Tensor sKfp8 = make_tensor(
         make_smem_ptr(reinterpret_cast<ElementKV*>(smem_ + Kernel_traits::kBaseSmemSize)),
         typename Kernel_traits::SmemLayoutKV{});
@@ -906,7 +906,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         clear(acc_s);
         FLASH_NAMESPACE::cp_async_wait<0>();
         __syncthreads();
-#if ORNITH_FP8_PIPELINE
+#if FA2_FP8KV_PIPELINE
         FLASH_NAMESPACE::copy<true, Is_even_K>(gmem_tiled_copy_KV, tKsKLoad, tKsK, tKVcKV, tKVpKV, 0, k_descale);
         __syncthreads();
 #endif
@@ -945,7 +945,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         FLASH_NAMESPACE::cp_async_wait<0>();
         __syncthreads();
         // if (tidx == 0 && blockIdx.y == 0 && blockIdx.z == 0) { print(tVsV); }
-#if ORNITH_FP8_PIPELINE
+#if FA2_FP8KV_PIPELINE
         FLASH_NAMESPACE::copy<true, Is_even_K>(gmem_tiled_copy_KV, tVsVLoad, tVsV, tKVcKV, tKVpKV, 0, v_descale);
         __syncthreads();
 #endif
@@ -992,7 +992,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         clear(acc_s);
         FLASH_NAMESPACE::cp_async_wait<0>();
         __syncthreads();
-#if ORNITH_FP8_PIPELINE
+#if FA2_FP8KV_PIPELINE
         FLASH_NAMESPACE::copy<true, Is_even_K>(gmem_tiled_copy_KV, tKsKLoad, tKsK, tKVcKV, tKVpKV, 0, k_descale);
         __syncthreads();
 #endif
@@ -1017,7 +1017,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
         FLASH_NAMESPACE::cp_async_wait<0>();
         __syncthreads();
-#if ORNITH_FP8_PIPELINE
+#if FA2_FP8KV_PIPELINE
         FLASH_NAMESPACE::copy<true, Is_even_K>(gmem_tiled_copy_KV, tVsVLoad, tVsV, tKVcKV, tKVpKV, 0, v_descale);
         __syncthreads();
 #endif

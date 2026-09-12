@@ -23,7 +23,7 @@ class Fp8Alphabet:
         q = torch.zeros((1, 2, 128), device='cuda', dtype=torch.bfloat16)
         out = torch.empty_like(q)
         scale = torch.tensor([self.scale], device='cuda', dtype=torch.float32)
-        result, _ = torch.ops.ornith_fa2_fp8.forward(
+        result, _ = torch.ops.fa2_fp8kv.forward(
             q, k, v, out, torch.tensor([0, 1], device='cuda', dtype=torch.int32),
             torch.tensor([1], device='cuda', dtype=torch.int32),
             torch.tensor([[0]], device='cuda', dtype=torch.int32), scale, scale,
@@ -90,7 +90,7 @@ class PagedCase:
         seq_k = torch.tensor(self.keys, device=device, dtype=torch.int32)
         ks = torch.tensor([self.key_scale], device=device, dtype=torch.float32)
         vs = torch.tensor([self.value_scale], device=device, dtype=torch.float32)
-        result, lse = torch.ops.ornith_fa2_fp8.forward(
+        result, lse = torch.ops.fa2_fp8kv.forward(
             q, k, v, out, cu_q, seq_k, table, ks, vs,
             max(self.queries), max(self.keys), self.causal, self.left, self.right,
             1 / math.sqrt(self.dim), self.splits,

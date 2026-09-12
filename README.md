@@ -44,8 +44,8 @@ docker run --rm --runtime runc \
   build.py --pipeline
 ```
 
-The output is `build-pipeline/ornith_fa2_fp8.so`. The historical `ornith`
-name remains part of the extension's operator namespace.
+The output is `build-pipeline/fa2_fp8kv.so`; the operator namespace is
+`torch.ops.fa2_fp8kv`.
 For a compatible local CUDA/PyTorch environment, `bash setup.sh` fetches
 the dependency and builds the same extension. `build.py --help` lists
 header-path overrides. Set `TORCH_CUDA_ARCH_LIST=8.6` explicitly in Docker:
@@ -61,9 +61,9 @@ docker run --rm --gpus all --ipc host \
   -v "$PWD:/work" -w /work --entrypoint bash \
   vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967 \
   -lc 'set -e
-    python3 bench.py --library build-pipeline/ornith_fa2_fp8.so --check-only
-    python3 check_replay.py build-pipeline/ornith_fa2_fp8.so
-    python3 check_full.py --library build-pipeline/ornith_fa2_fp8.so --full'
+    python3 bench.py --library build-pipeline/fa2_fp8kv.so --check-only
+    python3 check_replay.py build-pipeline/fa2_fp8kv.so
+    python3 check_full.py --library build-pipeline/fa2_fp8kv.so --full'
 ```
 
 For kernel timings, run `bench.py` with the same `--library` argument and

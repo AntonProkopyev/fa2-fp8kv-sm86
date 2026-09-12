@@ -2517,17 +2517,17 @@ def _copy_page_indices_kernel(
 
 # Local FA2 model-benchmark adapter. The registry entry retains FLASHINFER
 # for its cache layout, but all normal decoder attention below uses the
-# compiled ornith_fa2_fp8 operator, not FlashInfer attention kernels.
+# compiled fa2_fp8kv operator, not FlashInfer attention kernels.
 import os as _fa2_os
 
-torch.ops.load_library(_fa2_os.environ.get("FA2_FP8KV_LIBRARY", "/opt/ornith-fa2/ornith_fa2_fp8.so"))
-_FA2_SPLITS = int(_fa2_os.environ.get("ORNITH_FA2_SPLITS", "128"))
+torch.ops.load_library(_fa2_os.environ.get("FA2_FP8KV_LIBRARY", "/opt/fa2-fp8kv/fa2_fp8kv.so"))
+_FA2_SPLITS = int(_fa2_os.environ.get("FA2_FP8KV_SPLITS", "128"))
 if not 1 <= _FA2_SPLITS <= 128:
-    raise ValueError("ORNITH_FA2_SPLITS must be between 1 and 128")
+    raise ValueError("FA2_FP8KV_SPLITS must be between 1 and 128")
 
 
 @dataclass
-class OrnithFa2Metadata(FlashInferMetadata):
+class Fa2Fp8KvMetadata(FlashInferMetadata):
     fa2_query_start_loc: torch.Tensor
     fa2_seq_lens: torch.Tensor
     fa2_block_table: torch.Tensor
@@ -2535,7 +2535,7 @@ class OrnithFa2Metadata(FlashInferMetadata):
     fa2_max_model_len: int
 
 
-class OrnithFa2MetadataBuilder(FlashInferMetadataBuilder):
+class Fa2Fp8KvMetadataBuilder(FlashInferMetadataBuilder):
     def build(self, common_prefix_len, common_attn_metadata, fast_build=False):
         common = common_attn_metadata
         if common.causal is not True or self.use_dcp:
@@ -2547,7 +2547,7 @@ class OrnithFa2MetadataBuilder(FlashInferMetadataBuilder):
         actual = int(starts[-1].item())
         decoded = int(starts[num_decodes].item())
         max_query = int((starts[1:] - starts[:-1]).max().item()) if common.num_reqs else 0
-        return OrnithFa2Metadata(
+        return Fa2Fp8KvMetadata(
             num_actual_tokens=actual, slot_mapping=common.slot_mapping,
             q_data_type_prefill=self.q_data_type_prefill,
             q_data_type_decode=self.q_data_type_decode,
@@ -2565,7 +2565,7 @@ class OrnithFa2MetadataBuilder(FlashInferMetadataBuilder):
         return False
 
 
-class OrnithFa2Impl(FlashInferImpl):
+class Fa2Fp8KvImpl(FlashInferImpl):
     def forward(self, layer, query, key, value, kv_cache, attn_metadata,
                 output=None, output_scale=None, output_block_scale=None):
         if attn_metadata is None or attn_metadata.num_actual_tokens == 0:
@@ -2578,9 +2578,9 @@ class OrnithFa2Impl(FlashInferImpl):
             and kv_cache.dtype in (torch.uint8, torch.float8_e4m3fn)
             and get_kv_cache_layout() == "NHD"
         ):
-            raise NotImplementedError("FA2 benchmark requires Ornith TP2, BF16 Q, E4M3 KV, NHD")
+            raise NotImplementedError("FA2 adapter requires head_dim=256, one KV head, BF16 Q, E4M3 KV, NHD")
         assert output_scale is None and output_block_scale is None
-        assert isinstance(attn_metadata, OrnithFa2Metadata)
+        assert isinstance(attn_metadata, Fa2Fp8KvMetadata)
         count = attn_metadata.num_actual_tokens
         cache = kv_cache.view(torch.float8_e4m3fn).permute(
             *FlashInferBackend.get_kv_cache_stride_order()
@@ -2593,7 +2593,7 @@ class OrnithFa2Impl(FlashInferImpl):
         splits = _FA2_SPLITS if max_query <= 64 else 1
         max_kv = min(attn_metadata.fa2_max_model_len,
                      attn_metadata.fa2_block_table.shape[1] * keys.shape[1])
-        torch.ops.ornith_fa2_fp8.forward(
+        torch.ops.fa2_fp8kv.forward(
             query[:count], keys, values, output[:count],
             attn_metadata.fa2_query_start_loc, attn_metadata.fa2_seq_lens,
             attn_metadata.fa2_block_table, layer._k_scale, layer._v_scale,
@@ -2602,6 +2602,6 @@ class OrnithFa2Impl(FlashInferImpl):
         return output
 
 
-FlashInferMetadataBuilder = OrnithFa2MetadataBuilder
-FlashInferImpl = OrnithFa2Impl
-logger.info("ORNITH FA2 native GQA/async backend enabled; fixed decode splits=%s", _FA2_SPLITS)
+FlashInferMetadataBuilder = Fa2Fp8KvMetadataBuilder
+FlashInferImpl = Fa2Fp8KvImpl
+logger.info("FA2 FP8 KV native GQA/async backend enabled; fixed decode splits=%s", _FA2_SPLITS)
