@@ -1,0 +1,88 @@
+# FA2 FP8 KV for SM 8.6
+
+An experimental FlashAttention-2 derivative for paged FP8 KV attention on
+NVIDIA Ampere SM 8.6. This repository contains a CUDA extension and a narrow
+vLLM adapter validated during development with Ornith-1.5-35B-A3B-FP8 on
+two RTX 3090 GPUs. It is not the complete FlashAttention library or a
+drop-in replacement for `flash-attn`.
+
+Ampere has no native FP8 compute. K/V use FP8 storage; the kernel converts
+them to BF16 for attention math. The extension combines grouped-query
+packing with asynchronous FP8 tile loads and deferred BF16 conversion.
+
+## Scope and results
+
+The kernel includes head dimensions 128 and 256. The model adapter has a
+narrower contract: BF16 queries, FP8 E4M3 KV, head dimension 256, one KV
+head per rank, and NHD cache layout. It does not support decode context
+parallelism, sliding-window attention, or softcap. Shared Qwen3.5 ancestry
+does not establish compatibility with every Qwen3.5 model or configuration.
+
+See [BENCHMARKS.md](BENCHMARKS.md) for measured model throughput, isolated
+kernel timing, VRAM, correctness coverage, and long-context behavior.
+The complete-model improvement does not imply a faster isolated kernel.
+Full quality OFF is measured; quality ON and soak validation remain
+pending. This is an experimental serving path.
+
+## Build
+
+The reproducible environment is the pinned vLLM 0.27.1 image below.
+It provides CUDA, PyTorch, and FlashInfer headers. Fetch the pinned CUTLASS
+dependency on the host first: the container does not provide Git.
+Compilation does not need GPU access.
+The packaged source was successfully built and loaded with this image
+and `TORCH_CUDA_ARCH_LIST=8.6` on September 12, 2026.
+
+```bash
+git clone https://github.com/AntonProkopyev/fa2-fp8kv-sm86.git
+cd fa2-fp8kv-sm86
+bash setup.sh --fetch-only
+docker run --rm --runtime runc \
+  -e NVIDIA_VISIBLE_DEVICES=void -e MAX_JOBS=2 -e TORCH_CUDA_ARCH_LIST=8.6 \
+  -v "$PWD:/work" -w /work --entrypoint python3 \
+  vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967 \
+  build.py --pipeline
+```
+
+The output is `build-pipeline/ornith_fa2_fp8.so`. The historical `ornith`
+name remains part of the extension's operator namespace.
+For a compatible local CUDA/PyTorch environment, `bash setup.sh` fetches
+the dependency and builds the same extension. `build.py --help` lists
+header-path overrides. Set `TORCH_CUDA_ARCH_LIST=8.6` explicitly in Docker:
+the image's broader architecture list overrides the script's default.
+
+## GPU checks
+
+Run these when the GPU is free. They allocate GPU memory and exercise
+long-context cases. Use the same image that built the extension.
+
+```bash
+docker run --rm --gpus all --ipc host \
+  -v "$PWD:/work" -w /work --entrypoint bash \
+  vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967 \
+  -lc 'set -e
+    python3 bench.py --library build-pipeline/ornith_fa2_fp8.so --check-only
+    python3 check_replay.py build-pipeline/ornith_fa2_fp8.so
+    python3 check_full.py --library build-pipeline/ornith_fa2_fp8.so --full'
+```
+
+For kernel timings, run `bench.py` with the same `--library` argument and
+omit `--check-only`. These timings are not model tokens per second.
+Development results are recorded in [BENCHMARKS.md](BENCHMARKS.md);
+publication does not imply a fresh GPU run of the packaged source.
+
+## Serving integration
+
+Follow [the vLLM adapter instructions](integration/vllm/README.md).
+The adapter overlays an engine source file and must stay paired with its
+pinned engine version. No model weights or compiled binaries are included.
+
+## Contributing and licenses
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing kernels or reporting
+performance. File reproducible failures in
+[Issues](https://github.com/AntonProkopyev/fa2-fp8kv-sm86/issues).
+
+See [NOTICE](NOTICE), [LICENSE](LICENSE), and [licenses/](licenses/) for
+upstream attribution and component licenses. The adapter and project code
+use Apache-2.0; copied FlashAttention headers retain their BSD license.

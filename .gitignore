@@ -1,0 +1,11 @@
+build-*/
+third_party/
+__pycache__/
+*.pyc
+*.so
+*.o
+.venv/
+.env
+*.log
+FORK_REPORT.md
+SANITIZATION_REPORT.md
