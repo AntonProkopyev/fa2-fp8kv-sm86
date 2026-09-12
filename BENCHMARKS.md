@@ -71,5 +71,38 @@ Full quality OFF completed all 150 scenarios: 117/150 (78%) at pass@1.
 ToolCall 14/15, InstructFollow 13/15, StructOutput 15/15, DataExtract
 10/15, ReasonMath 13/15, BugFind 13/15, Hermes 12/20, CLI 27/40.
 The harness was benchlocal-cli 0.9.9 with explicit thinking OFF.
-Quality ON and soak were still running when these results were prepared.
+Quality ON was stopped after 97 scenario records to test another model;
+soak was not run. The partial ON journal is not a full quality result.
 No production stability claim is made from the speed test.
+
+## Qwen3.8-27B FP8 with DFlash2
+
+Same two RTX 3090 GPUs, TP2, DFlash2 W4A16 n=7, FP8 E4M3 KV for target
+and draft, vision, context 262144, one request, prefill chunk 2048.
+The engine used the local club-3090 DFlash2 backport on vLLM 0.27.1.
+The backport is a separate requirement and is not installed by this repo.
+Three warmups and five measured requests per prompt; the sampler and
+narrative/code limits are the same as the model A/B above.
+
+| Metric | FA2 target, FlashInfer draft | FA2 target and draft |
+|---|---:|---:|
+| Narrative decode tokens/s | 75.93 ± 2.83 | 97.63 ± 2.58 |
+| Code decode tokens/s | 147.99 ± 4.32 | 189.50 ± 4.94 |
+| Narrative wall tokens/s | 75.07 ± 2.71 | 96.38 ± 2.59 |
+| Code wall tokens/s | 142.20 ± 4.32 | 180.62 ± 5.45 |
+| TTFT narrative / code | 149 / 156 ms | 133 / 139 ms |
+| Peak VRAM GPU0 / GPU1 during bench | 23752 / 23754 MiB | 23756 / 23756 MiB |
+
+The FlashInfer draft ran eagerly. FA2 enabled a full CUDA Graph for the
+draft, so this measures both the kernel and execution-path change.
+Both variants passed nine applicable functional checks and vision 4/4.
+The all-FA2 profile recovered a control string from 261000 input tokens
+in 428.1 seconds; over-limit requests returned HTTP 400.
+Quality OFF completed all 75 medium scenarios with 62 passed.
+A separate image request with 4070 image tokens recovered all fixture
+facts in 3.789 seconds. Large image plus 261K text was not tested together.
+Full 150-scenario quality, complete ON quality and soak are not claimed.
+
+This is still a decode-oriented implementation. Its current GQA packing
+does not cover large prefill query blocks; input throughput needs separate
+measurement and optimization.

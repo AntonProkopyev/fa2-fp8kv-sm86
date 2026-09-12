@@ -2,8 +2,8 @@
 
 An experimental FlashAttention-2 derivative for paged FP8 KV attention on
 NVIDIA Ampere SM 8.6. This repository contains a CUDA extension and a narrow
-vLLM adapter validated during development with Ornith-1.5-35B-A3B-FP8 on
-two RTX 3090 GPUs. It is not the complete FlashAttention library or a
+vLLM adapter tested on two RTX 3090 GPUs. Model-specific measurements are
+recorded in BENCHMARKS.md. It is not the complete FlashAttention library or a
 drop-in replacement for `flash-attn`.
 
 Ampere has no native FP8 compute. K/V use FP8 storage; the kernel converts
@@ -13,16 +13,17 @@ packing with asynchronous FP8 tile loads and deferred BF16 conversion.
 ## Scope and results
 
 The kernel includes head dimensions 128 and 256. The model adapter has a
-narrower contract: BF16 queries, FP8 E4M3 KV, head dimension 256, one KV
-head per rank, and NHD cache layout. It does not support decode context
-parallelism, sliding-window attention, or softcap. Shared Qwen3.5 ancestry
+narrower contract: BF16 queries, FP8 E4M3 KV, NHD layout, and the tested
+(head dimension, KV heads per rank) pairs (256, 1), (256, 2), and (128, 4).
+It supports full causal attention and noncausal attention with a 2048-token
+left window. Decode context parallelism and softcap are unsupported. Shared Qwen3.5 ancestry
 does not establish compatibility with every Qwen3.5 model or configuration.
 
 See [BENCHMARKS.md](BENCHMARKS.md) for measured model throughput, isolated
 kernel timing, VRAM, correctness coverage, and long-context behavior.
 The complete-model improvement does not imply a faster isolated kernel.
-Full quality OFF is measured; quality ON and soak validation remain
-pending. This is an experimental serving path.
+Quality OFF is measured; complete quality ON and soak validation are
+not available. This is an experimental serving path.
 
 ## Build
 

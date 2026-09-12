@@ -2536,10 +2536,17 @@ class Fa2Fp8KvMetadata(FlashInferMetadata):
 
 
 class Fa2Fp8KvMetadataBuilder(FlashInferMetadataBuilder):
+    @classmethod
+    def get_cudagraph_support(cls, vllm_config, kv_cache_spec):
+        if (current_platform.is_device_capability(86)
+                and vllm_config.parallel_config.decode_context_parallel_size == 1):
+            return AttentionCGSupport.UNIFORM_BATCH
+        return super().get_cudagraph_support(vllm_config, kv_cache_spec)
+
     def build(self, common_prefix_len, common_attn_metadata, fast_build=False):
         common = common_attn_metadata
-        if common.causal is not True or self.use_dcp:
-            raise NotImplementedError("FA2 experiment supports causal, non-DCP attention")
+        if self.use_dcp:
+            raise NotImplementedError("FA2 adapter does not support DCP")
         num_decodes, num_prefills, _, _ = split_decodes_and_prefills(
             common, decode_threshold=self.reorder_batch_threshold, require_uniform=True,
         )
@@ -2553,7 +2560,7 @@ class Fa2Fp8KvMetadataBuilder(FlashInferMetadataBuilder):
             q_data_type_decode=self.q_data_type_decode,
             num_decodes=num_decodes, num_decode_tokens=decoded,
             num_prefills=num_prefills, num_prefill_tokens=actual - decoded,
-            causal=True, prefill=None, decode=None, use_cascade=False, cascade_wrapper=None,
+            causal=common.causal, prefill=None, decode=None, use_cascade=False, cascade_wrapper=None,
             fa2_query_start_loc=common.query_start_loc[:common.num_reqs + 1],
             fa2_seq_lens=common.seq_lens[:common.num_reqs],
             fa2_block_table=common.block_table_tensor[:common.num_reqs],
@@ -2571,14 +2578,14 @@ class Fa2Fp8KvImpl(FlashInferImpl):
         if attn_metadata is None or attn_metadata.num_actual_tokens == 0:
             return output.fill_(0)
         if not (
-            self.head_size == 256 and self.num_kv_heads == 1
+            (self.head_size, self.num_kv_heads) in ((256, 1), (256, 2), (128, 4))
             and query.dtype == torch.bfloat16 and self.dcp_world_size == 1
-            and self.window_left == -1 and not self.logits_soft_cap
+            and self.window_left in (-1, 2047) and not self.logits_soft_cap
             and self.kv_cache_dtype in ("fp8", "fp8_e4m3")
             and kv_cache.dtype in (torch.uint8, torch.float8_e4m3fn)
             and get_kv_cache_layout() == "NHD"
         ):
-            raise NotImplementedError("FA2 adapter requires head_dim=256, one KV head, BF16 Q, E4M3 KV, NHD")
+            raise NotImplementedError("FA2 adapter requires supported head geometry, BF16 Q, E4M3 KV, NHD")
         assert output_scale is None and output_block_scale is None
         assert isinstance(attn_metadata, Fa2Fp8KvMetadata)
         count = attn_metadata.num_actual_tokens
@@ -2587,17 +2594,19 @@ class Fa2Fp8KvImpl(FlashInferImpl):
         )
         keys, values = cache.split(self.head_size, dim=-1)
         max_query = attn_metadata.fa2_max_query_len
-        grouped = max_query * query.shape[1] <= 64
+        grouped = (attn_metadata.causal and self.window_left == -1
+                   and max_query * (query.shape[1] // self.num_kv_heads) <= 64)
         # Split count must remain fixed in a full CUDA Graph. Sequence lengths
         # and page indices remain device tensors and change on every replay.
-        splits = _FA2_SPLITS if max_query <= 64 else 1
+        splits = (_FA2_SPLITS if attn_metadata.causal else 32) if max_query <= 64 else 1
         max_kv = min(attn_metadata.fa2_max_model_len,
                      attn_metadata.fa2_block_table.shape[1] * keys.shape[1])
         torch.ops.fa2_fp8kv.forward(
             query[:count], keys, values, output[:count],
             attn_metadata.fa2_query_start_loc, attn_metadata.fa2_seq_lens,
             attn_metadata.fa2_block_table, layer._k_scale, layer._v_scale,
-            max_query, max_kv, True, -1, -1, self.scale, splits, grouped,
+            max_query, max_kv, attn_metadata.causal, self.window_left, -1,
+            self.scale, splits, grouped,
         )
         return output
 

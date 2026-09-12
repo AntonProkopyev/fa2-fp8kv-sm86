@@ -5,12 +5,14 @@ This source overlay targets vLLM 0.27.1 at image digest
 Do not apply it to an arbitrary vLLM version: it replaces the entire
 `vllm.v1.attention.backends.flashinfer` module.
 
-The tested model is `ornith-ai/Ornith-1.5-35B-A3B-FP8` with two RTX 3090
-GPUs, TP=2, MTP=3, vision enabled, and a 262144-token context limit.
-Supported decoder inputs are BF16 queries, FP8 E4M3 KV, head dimension 256,
-one KV head per rank, and NHD cache layout. Decode context parallelism,
-sliding-window attention, and softcap are not supported by this adapter.
-The kernel's broader head-dimension support does not widen this contract.
+Measured configurations use two RTX 3090 GPUs, TP=2, vision and a
+262144-token context limit: Ornith-1.5-35B-A3B-FP8 with MTP=3, and
+Qwen3.8-27B FP8 with DFlash2 W4A16 n=7.
+Supported decoder inputs are BF16 queries, FP8 E4M3 KV, NHD layout, and
+(head dimension, KV heads per rank) pairs (256, 1), (256, 2), and (128, 4).
+The adapter supports full causal attention and a noncausal 2048-token left
+window. Decode context parallelism, other window sizes and softcap are
+unsupported. These checks do not establish general model compatibility.
 
 ## Mounts and settings
 
@@ -48,9 +50,23 @@ On the tested PCIe-only two-RTX-3090 topology, also pass
 `--disable-custom-all-reduce`. Evaluate that setting for your actual
 interconnect instead of copying it to an NVLink system.
 
+For DFlash2, replace the MTP speculative configuration with:
+
+```json
+{"method":"dflash","model":"/draft","num_speculative_tokens":7,"attention_backend":"FLASHINFER","kv_cache_dtype":"fp8_e4m3"}
+```
+
+Mount the compatible draft checkpoint at `/draft`. DFlash2 also requires
+compatible engine support: the measured vLLM 0.27.1 run used a local
+club-3090 DFlash2 backport, which this repository does not install.
+The adapter captures noncausal draft attention in a full CUDA Graph;
+look for `Capturing dflash2 CUDA graphs (FULL)` in the startup log.
+Switching the draft to stock FA2 with BF16 KV exceeded the measured rig's
+KV memory budget at 262144 context. The custom path retains FP8 KV.
+
 `FLASHINFER` remains the registry enum used to select the cache layout.
 The overlay routes normal decoder attention, including MTP attention,
-through the FA2 extension. It does not replace the model's Gated DeltaNet
+and supported DFlash2 attention, through the FA2 extension. It does not replace the model's Gated DeltaNet
 or vision encoder kernels. Confirm the startup log contains
 `FA2 FP8 KV native GQA/async backend enabled`.
 
