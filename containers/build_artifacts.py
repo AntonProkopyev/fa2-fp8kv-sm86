@@ -53,7 +53,7 @@ for filename, directory in [("fa2_fp8kv.so", "build-pipeline"),
     shutil.copy2(source / directory / filename, args.out / filename)
     torch.ops.load_library(str(args.out / filename))
 shutil.copytree(source / "licenses", args.out / "licenses")
-shutil.copy2(cutlass / "LICENSE", args.out / "licenses/CUTLASS-LICENSE")
+shutil.copy2(cutlass / "LICENSE.txt", args.out / "licenses/CUTLASS-LICENSE")
 for name in ("LICENSE", "NOTICE"):
     shutil.copy2(source / name, args.out / name)
 files = {p.relative_to(args.out).as_posix(): digest(p)
