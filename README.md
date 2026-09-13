@@ -91,6 +91,11 @@ publication does not imply a fresh GPU run of the packaged source.
 
 ## Serving integration
 
+The [vLLM 0.29 FlashAttention plugin](integration/vllm_plugin/README.md) is under
+validation. It selects `FLASH_ATTN` through vLLM's plugin registry and leaves
+FlashInfer source files untouched. The instructions below describe the older
+0.27.1 overlay.
+
 Follow [the vLLM adapter instructions](integration/vllm/README.md).
 The adapter overlays an engine source file and must stay paired with its
 pinned engine version. No model weights or compiled binaries are included.

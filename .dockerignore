@@ -1,0 +1,12 @@
+.git
+upstream/flash-attention
+third_party
+build/
+build-*/
+dist
+*.egg-info
+**/__pycache__
+*.so
+*.o
+*.log
+.env

@@ -7,5 +7,8 @@ __pycache__/
 .venv/
 .env
 *.log
+*.egg-info/
+build/
+dist/
 FORK_REPORT.md
 SANITIZATION_REPORT.md

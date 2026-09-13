@@ -14,9 +14,13 @@ FlashAttention headers retain their original copyright notices and BSD
 licenses/flash-attention-AUTHORS.
 
 The CUDA adapter and vLLM integration are Apache-2.0 licensed.
-The vLLM integration derives from vLLM 0.27.1's FlashInfer backend and
+The legacy vLLM integration derives from vLLM 0.27.1's FlashInfer backend and
 retains its upstream notices. It includes earlier speculative-decoding
 integration work; the FA2 path bypasses FlashInfer attention planning.
+
+The vLLM 0.29 plugin uses the FlashAttention backend interface, metadata
+builder and KV-write operation from vLLM, licensed Apache-2.0. It registers
+through vLLM's backend plugin API and leaves the stock source files intact.
 
 Local modifications add paged FP8 E4M3 KV loading, BF16 conversion,
 split-KV decoding, GQA row packing with causal remapping, asynchronous
