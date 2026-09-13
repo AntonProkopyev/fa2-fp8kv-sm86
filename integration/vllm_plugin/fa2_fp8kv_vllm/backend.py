@@ -15,11 +15,11 @@ from vllm.v1.kv_cache_layout import KVCacheLayout
 
 
 def extension_selected(cache_dtype):
-    return (current_platform.is_device_capability(86)
+    return (current_platform.get_device_capability() in ((8, 6), (8, 9), (12, 0))
             and cache_dtype in ("fp8", "fp8_e4m3"))
 
 
-if current_platform.is_device_capability(86):
+if current_platform.get_device_capability() in ((8, 6), (8, 9), (12, 0)):
     torch.ops.load_library(os.environ["FA2_FP8KV_LIBRARY"])
     torch.ops.load_library(os.environ["FA2_FP8KV_PREFILL_LIBRARY"])
 

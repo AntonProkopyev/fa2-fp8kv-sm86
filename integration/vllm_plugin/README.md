@@ -6,11 +6,13 @@ FlashAttention metadata and KV-write contract. It does not edit vLLM source
 files or inherit its FlashInfer implementation.
 
 Select `--attention-backend FLASH_ATTN` for the target and
-`"attention_backend":"FLASH_ATTN"` in the DFlash configuration. With SM86
+`"attention_backend":"FLASH_ATTN"` in the DFlash configuration. With SM86,
+SM89 or SM120
 and FP8 E4M3 KV, the plugin selects the custom CUDA operator; other native
 FlashAttention configurations delegate to the stock implementation. This
-does not establish FP8 support on SM89 or SM120: those runtime ports remain
-unvalidated and the current CUDA operator is SM86-gated.
+does not establish runtime validation on SM89 or SM120. The image recipe
+builds native code for all three targets; only SM86 has been exercised on a
+physical GPU. SM89/SM120 execution and performance remain unverified.
 
 The plugin wheel contains the Python adapter and prefill modules. CUDA
 libraries are supplied separately through `FA2_FP8KV_LIBRARY` and

@@ -102,7 +102,9 @@ std::tuple<at::Tensor, at::Tensor> forward(
     const auto stream = c10::cuda::getCurrentCUDAStream(q.get_device());
     cudaDeviceProp properties;
     C10_CUDA_CHECK(cudaGetDeviceProperties(&properties, q.get_device()));
-    TORCH_CHECK(properties.major == 8 && properties.minor == 6, "This experimental kernel is gated to SM86");
+    const int sm = properties.major * 10 + properties.minor;
+    TORCH_CHECK(sm == 86 || sm == 89 || sm == 120,
+                "This kernel build targets SM86, SM89 and SM120");
     if (splits == 0) {
         // Keep prefill scratch bounded; short speculative queries benefit from split-KV.
         const int64_t active_k = window_left >= 0 ? std::min(max_k, window_left + max_q) : max_k;

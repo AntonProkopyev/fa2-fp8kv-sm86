@@ -30,8 +30,8 @@ args = parser.parse_args()
 revision = os.environ.get("SOURCE_REVISION", "")
 if not re.fullmatch("[0-9a-f]{40}", revision):
     raise SystemExit("SOURCE_REVISION must be the full source commit SHA")
-if os.environ.get("TORCH_CUDA_ARCH_LIST") != "8.6":
-    raise SystemExit("This recipe currently builds the SM86 validation target")
+if os.environ.get("TORCH_CUDA_ARCH_LIST") != "8.6;8.9;12.0":
+    raise SystemExit("This recipe builds SM86, SM89 and SM120; runtime validation is separate")
 source = Path.cwd()
 args.out.mkdir(parents=True, exist_ok=True)
 # A fixed build path keeps dependency paths in CUDA line information stable.
@@ -64,7 +64,7 @@ manifest = {
             "python_soabi": sysconfig.get_config_var("SOABI"),
             "machine": platform.machine(), "system": platform.system(),
             "cxx11_abi": torch._C._GLIBCXX_USE_CXX11_ABI},
-    "compiled_sm": ["8.6"],
+    "compiled_sm": ["8.6", "8.9", "12.0"],
     "build_provenance": {"vllm": importlib.metadata.version("vllm"),
                          "flashinfer_headers": importlib.metadata.version("flashinfer-python"),
                          "cutlass": CUTLASS,

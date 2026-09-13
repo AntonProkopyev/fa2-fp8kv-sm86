@@ -355,7 +355,7 @@ diff --git a/csrc/flash_attn/src/fp8_attn.cu b/csrc/flash_attn/src/fp8_attn.cu
 new file mode 100644
 --- /dev/null
 +++ b/csrc/flash_attn/src/fp8_attn.cu
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,189 @@
 +// SPDX-License-Identifier: Apache-2.0
 +// FP8-cache adapter for the pinned FlashAttention 2 split-KV kernels.
 +#include <ATen/ATen.h>
@@ -460,7 +460,9 @@ new file mode 100644
 +    const auto stream = c10::cuda::getCurrentCUDAStream(q.get_device());
 +    cudaDeviceProp properties;
 +    C10_CUDA_CHECK(cudaGetDeviceProperties(&properties, q.get_device()));
-+    TORCH_CHECK(properties.major == 8 && properties.minor == 6, "This experimental kernel is gated to SM86");
++    const int sm = properties.major * 10 + properties.minor;
++    TORCH_CHECK(sm == 86 || sm == 89 || sm == 120,
++                "This kernel build targets SM86, SM89 and SM120");
 +    if (splits == 0) {
 +        // Keep prefill scratch bounded; short speculative queries benefit from split-KV.
 +        const int64_t active_k = window_left >= 0 ? std::min(max_k, window_left + max_q) : max_k;
