@@ -25,6 +25,15 @@ The complete-model improvement does not imply a faster isolated kernel.
 Quality OFF is measured; complete quality ON and soak validation are
 not available. This is an experimental serving path.
 
+## Upstream comparison
+
+The original FA2 revision is pinned as a submodule in
+[`upstream/flash-attention`](upstream/flash-attention). The
+[CUDA source patch](patches/fa2-fp8kv.patch) can be checked with
+`git submodule update --init upstream/flash-attention` followed by
+`python3 check_upstream.py`. See [the mapping and verification steps](upstream/README.md)
+for the four modified headers, twelve unchanged headers and two new CUDA files.
+
 ## Build
 
 The reproducible environment is the pinned vLLM 0.27.1 image below.

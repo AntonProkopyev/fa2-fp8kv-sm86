@@ -4,6 +4,11 @@ This project contains a modified subset of FlashAttention-2, derived from
 vllm-project/flash-attention commit 28e862d21806bc3580207aa0ad4e2759151e9827,
 itself a fork of Dao-AILab/flash-attention.
 
+That upstream revision is pinned in the upstream/flash-attention submodule.
+patches/fa2-fp8kv.patch records the CUDA source diff; check_upstream.py verifies
+that applying it reproduces all mapped project sources byte-for-byte.
+See upstream/README.md for the file mapping and the scope of the comparison.
+
 FlashAttention headers retain their original copyright notices and BSD
 3-Clause license. See licenses/flash-attention-BSD-3-Clause.txt and
 licenses/flash-attention-AUTHORS.

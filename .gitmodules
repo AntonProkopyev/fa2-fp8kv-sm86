@@ -1,0 +1,4 @@
+[submodule "upstream/flash-attention"]
+	path = upstream/flash-attention
+	url = https://github.com/vllm-project/flash-attention.git
+	shallow = true

@@ -5,6 +5,11 @@ before broadening the model adapter or replacing dependency pins.
 
 ## Validation
 
+After changing CUDA sources or vendored headers, regenerate
+`patches/fa2-fp8kv.patch` as described in `upstream/README.md` and run
+`python3 check_upstream.py`. Keep the submodule at the recorded source revision
+unless intentionally rebasing the derivative onto another upstream version.
+
 Build with the image and commands in [README.md](README.md). Run the three
 GPU checks there after kernel or adapter changes when an SM 8.6 GPU is
 available. Report checks you could not run. Preserve reference comparisons
