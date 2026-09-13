@@ -25,5 +25,5 @@ medium quality run scored 64/75, matching the stock-FI layout-control arm.
 Complete serving-graph validation is still in progress. These are experimental
 results, not a production guarantee or a claim of bit-identical model outputs.
 
-The older `integration/vllm/flashinfer.py` is the historical vLLM 0.27.1 overlay.
+`integration/vllm/flashinfer.py` provides the source overlay for vLLM 0.27.1.
 Do not combine that overlay with this plugin.
