@@ -34,8 +34,10 @@ image. It refuses a corrupted cache. The serving integration must verify
 `manifest.json` against its pinned artifact ID and runtime ABI before loading
 the wheel and libraries. The ultramax integration in
 [club-3090 PR #1274](https://github.com/noonghunna/club-3090/pull/1274)
-provides that consumer and a read-only runtime mount. Registry visibility must
-be public before an unauthenticated user can pull the image.
+provides that consumer and a read-only runtime mount. The package is public;
+pulling this digest with an empty Docker configuration and exporting it into
+an empty directory were verified. Normal vLLM torch.compile/Triton warmup
+remains; the FA2 libraries are already compiled.
 
 ## Build from the pinned source
 
