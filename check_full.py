@@ -105,28 +105,29 @@ class PagedCase:
             if not count_q:
                 continue
             selected = torch.tensor(pages, device=device, dtype=torch.long)
-            q_positions = torch.arange(count_q, device=device) + count_k - count_q
             k_positions = torch.arange(count_k, device=device)
-            mask = torch.ones((count_q, count_k), device=device, dtype=torch.bool)
-            if self.causal:
-                mask &= k_positions[None, :] <= q_positions[:, None]
-            if self.left >= 0:
-                mask &= k_positions[None, :] >= q_positions[:, None] - self.left
-            if self.right >= 0:
-                mask &= k_positions[None, :] <= q_positions[:, None] + self.right
-            valid = mask.any(dim=-1)
             for head in range(self.kv_heads):
-                # Process one KV head at a time to bound reference-test memory.
+                # Bound the independent FP32 oracle along both heads and queries.
                 key = (k[selected, :, head, :].reshape(-1, self.dim)[:count_k].float() * ks).bfloat16().float()
                 value = (v[selected, :, head, :].reshape(-1, self.dim)[:count_k].float() * vs).bfloat16().float()
-                query = q[start:start + count_q, head * group:(head + 1) * group].float().transpose(0, 1)
-                scores = torch.matmul(query, key.T) / math.sqrt(self.dim)
-                scores.masked_fill_(~mask, -float('inf'))
-                weights = scores.softmax(dim=-1)
-                weights = torch.where(valid[None, :, None], weights, 0)
-                expected[start:start + count_q, head * group:(head + 1) * group] = torch.matmul(weights, value).transpose(0, 1).bfloat16()
-                expected_lse[head * group:(head + 1) * group, start:start + count_q] = torch.where(
-                    valid[None, :], scores.logsumexp(-1), float('inf'))
+                for first in range(0, count_q, 128):
+                    last = min(first + 128, count_q)
+                    q_positions = torch.arange(first, last, device=device) + count_k - count_q
+                    mask = torch.ones((last - first, count_k), device=device, dtype=torch.bool)
+                    if self.causal:
+                        mask &= k_positions[None, :] <= q_positions[:, None]
+                    if self.left >= 0:
+                        mask &= k_positions[None, :] >= q_positions[:, None] - self.left
+                    if self.right >= 0:
+                        mask &= k_positions[None, :] <= q_positions[:, None] + self.right
+                    valid = mask.any(dim=-1)
+                    query = q[start + first:start + last, head * group:(head + 1) * group].float().transpose(0, 1)
+                    scores = torch.matmul(query, key.T) / math.sqrt(self.dim)
+                    scores.masked_fill_(~mask, -float('inf'))
+                    weights = torch.where(valid[None, :, None], scores.softmax(dim=-1), 0)
+                    expected[start + first:start + last, head * group:(head + 1) * group] = torch.matmul(weights, value).transpose(0, 1).bfloat16()
+                    expected_lse[head * group:(head + 1) * group, start + first:start + last] = torch.where(
+                        valid[None, :], scores.logsumexp(-1), float('inf'))
             start += count_q
         difference = result.float() - expected.float()
         relative = (difference.norm() / expected.float().norm().clamp_min(1e-8)).item()
@@ -144,11 +145,14 @@ class PagedCase:
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--full', action='store_true')
+parser.add_argument('--long-query', action='store_true')
+parser.add_argument('--large-workspace', action='store_true', help='Exercise >2^31 FP32 scratch elements; needs about 9 GiB VRAM')
+parser.add_argument('--case', default='', help='Run one named case')
 parser.add_argument('--library', required=True)
 args = parser.parse_args()
 torch.ops.load_library(args.library)
 torch.backends.cuda.matmul.allow_tf32 = False
-torch.cuda.set_per_process_memory_fraction(0.20)
+torch.cuda.set_per_process_memory_fraction(0.75 if args.large_workspace else 0.20)
 cases = [
     Fp8Alphabet(1.0),
     Fp8Alphabet(0.37),
@@ -170,6 +174,29 @@ if args.full:
         PagedCase('ragged-empty-splits', 256, 12, 2, (1, 7), (1, 73), 16, True, splits=32),
         PagedCase('causal-leading-mask', 128, 16, 4, (7,), (3,), 16, True, splits=4),
     ]
+if args.long_query:
+    cases += [
+        PagedCase('mixed-2049', 256, 12, 2, (1, 2049), (37, 2111), 800, True,
+                  key_scale=0.37, value_scale=1.7, strided=True),
+        PagedCase('mixed-4097', 256, 12, 2, (4097, 8), (8193, 37), 16, True, splits=0),
+        PagedCase('two-prefills-empty-row', 128, 32, 4, (4096, 0, 2049), (5003, 0, 3073), 16, True),
+        PagedCase('mixed-window', 128, 16, 4, (8, 4097), (37, 5000), 16, left=2047, right=0),
+        PagedCase('mixed-split', 256, 6, 1, (1, 4097), (31, 5001), 16, True, splits=4),
+        PagedCase('ragged-leading-mask', 128, 8, 2, (1, 129), (3, 1), 16, True),
+        PagedCase('long-leading-mask', 256, 6, 1, (1, 4097), (31, 1001), 16, True),
+        PagedCase('query-16384', 128, 1, 1, (16384,), (16384,), 256, True),
+        PagedCase('query-262144', 128, 1, 1, (1, 262144), (3, 1), 16, True),
+        PagedCase('long-query-long-context', 128, 4, 1, (1, 2049), (37, 262144), 256, True),
+    ]
+if args.case:
+    cases = [case for case in cases if getattr(case, 'name', '') == args.case]
+    if not cases:
+        parser.error('Unknown case')
+if args.large_workspace:
+    # 128 * 2 * 4 * 8193 * 256 exceeds INT_MAX; merely assigning an int
+    # expression to index_t would still overflow before that conversion.
+    cases = [PagedCase('split-offset-64bit', 256, 4, 1, (1, 8193), (3, 31),
+                       16, True, splits=128)]
 with torch.inference_mode():
     for case in cases:
         torch.cuda.reset_peak_memory_stats()

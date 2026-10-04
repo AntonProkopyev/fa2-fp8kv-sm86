@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Replace the v0.1.0 per-request query-chunk workaround with one native
+  batched operator call. Accept Q across the existing 262144-token context
+  envelope; CUDA work is already tiled in 64-query blocks.
+- Fix packed LSE addressing for fully masked rows in ragged unsplit batches
+  and widen split-workspace address arithmetic before multiplication.
+- Export the compiled query limit in artifact manifests so consumers can
+  retire their 2048 scheduler clamp while retaining compatibility with old
+  images. Add long-query, graph-replay, large-workspace and performance checks.
+
 ## 0.1.0 — 2026-10-04
 
 - Split long full-causal prefill in mixed vLLM 0.29 batches into per-request

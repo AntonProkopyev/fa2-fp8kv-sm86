@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fa2-fp8kv-vllm"
-version = "0.1.0"
+version = "0.1.1"
 description = "FlashAttention FP8 KV extension for vLLM"
 requires-python = ">=3.10"
 dependencies = ["vllm>=0.29.0"]
