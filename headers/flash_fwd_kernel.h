@@ -551,9 +551,13 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         // or get wrong results when we combine gOaccum from different blocks.
         const index_t row_offset_o = binfo.q_offset(params.o_batch_stride, params.o_row_stride, bidb)
             + m_block * kBlockM * params.o_row_stride + bidh * params.o_head_stride;
-        const index_t row_offset_oaccum = (((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q
+        const index_t row_offset_oaccum = (((index_t(n_split_idx) * params.b + bidb) * params.h + bidh) * params.seqlen_q
             + m_block * kBlockM) * params.d_rounded;
-        const index_t row_offset_lseaccum = ((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q + m_block * kBlockM;
+        // Empty causal tiles use the same packed LSE layout as nonempty tiles.
+        // The padded split layout overruns LSE for ragged, unsplit batches.
+        const index_t row_offset_lseaccum = (Split || !params.unpadded_lse ?
+                ((index_t(n_split_idx) * params.b + bidb) * params.h + bidh) * params.seqlen_q : index_t(bidh) * params.total_q + binfo.q_offset(params.seqlen_q, 1, bidb)
+            ) + m_block * kBlockM;
         Tensor gOaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementO *>(Split ? params.oaccum_ptr : params.o_ptr) + (Split ? row_offset_oaccum : row_offset_o)),
                                       Shape<Int<kBlockM>, Int<kHeadDim>>{},
                                      make_stride(Split ? kHeadDim : params.o_row_stride, _1{}));
@@ -1096,10 +1100,10 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
     const index_t row_offset_o = binfo.q_offset(params.o_batch_stride, params.o_row_stride, bidb)
         + m_block * kBlockM * params.o_row_stride + bidh * params.o_head_stride;
-    const index_t row_offset_oaccum = (((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q
+    const index_t row_offset_oaccum = (((index_t(n_split_idx) * params.b + bidb) * params.h + bidh) * params.seqlen_q
                                          + m_block * kBlockM) * params.d_rounded;
     const index_t row_offset_lseaccum = (Split || !params.unpadded_lse ?
-            ((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q : bidh * params.total_q + binfo.q_offset(params.seqlen_q, 1, bidb)
+            ((index_t(n_split_idx) * params.b + bidb) * params.h + bidh) * params.seqlen_q : index_t(bidh) * params.total_q + binfo.q_offset(params.seqlen_q, 1, bidb)
         ) + m_block * kBlockM;
 
     Tensor gOaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementO *>(Split ? params.oaccum_ptr : params.o_ptr) + (Split ? row_offset_oaccum : row_offset_o)),
@@ -1206,7 +1210,7 @@ inline __device__ void combine_attn_seqk_parallel(const Params &params) {
     const int tidx = threadIdx.x;
     const int bidx = blockIdx.x;
 
-    const index_t lse_size = params.b * params.h * params.seqlen_q;
+    const index_t lse_size = index_t(params.b) * params.h * params.seqlen_q;
 
     const index_t row_offset_lse = bidx * kBlockM;
     Tensor gLSEaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.softmax_lseaccum_ptr) + row_offset_lse),
@@ -1305,7 +1309,7 @@ inline __device__ void combine_attn_seqk_parallel(const Params &params) {
     }
     __syncthreads();
 
-    const index_t row_offset_oaccum = bidx * kBlockM * params.d_rounded;
+    const index_t row_offset_oaccum = index_t(bidx) * kBlockM * params.d_rounded;
     Tensor gOaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.oaccum_ptr) + row_offset_oaccum),
                                  Shape<Int<kBlockM>, Int<kHeadDim>>{},
                                  Stride<Int<kHeadDim>, _1>{});
@@ -1349,7 +1353,7 @@ inline __device__ void combine_attn_seqk_parallel(const Params &params) {
             }
         // if (cute::thread0()) { printf("lse_scale = %f, %f\n", sLSE[split][0], sLSE[split][1]); print(tOrOaccum); }
         }
-        tOgOaccum.data() = tOgOaccum.data() + params.b * params.h * params.seqlen_q * params.d_rounded;
+        tOgOaccum.data() = tOgOaccum.data() + index_t(params.b) * params.h * params.seqlen_q * params.d_rounded;
     }
     // if (cute::thread0()) { print_tensor(tOrO); }
 

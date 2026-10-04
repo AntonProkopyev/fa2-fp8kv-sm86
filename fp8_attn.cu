@@ -18,6 +18,8 @@ namespace flash = fa2_fp8kv_kernel;
 
 namespace fa2_fp8kv {
 
+constexpr int64_t max_context_tokens = 262144;
+
 template<int HeadDim>
 struct Fp8Traits : Flash_fwd_kernel_traits<HeadDim, 64, (HeadDim == 256 ? 32 : 64), 4, false, false, cutlass::bfloat16_t> {
     using Base = Flash_fwd_kernel_traits<HeadDim, 64, (HeadDim == 256 ? 32 : 64), 4, false, false, cutlass::bfloat16_t>;
@@ -39,7 +41,7 @@ void launch(fa2_fp8kv_kernel::Flash_fwd_params& params, cudaStream_t stream) {
     kernel<<<grid, Traits::kNThreads, Traits::kSmemSize, stream>>>(params);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     if constexpr (Split) {
-        const dim3 combine((params.b * params.h * params.seqlen_q + 3) / 4);
+        const dim3 combine((int64_t(params.b) * params.h * params.seqlen_q + 3) / 4);
         fa2_fp8kv_kernel::flash_fwd_splitkv_combine_kernel<Traits, 4, 7, true>
             <<<combine, Traits::kNThreads, 0, stream>>>(params);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -90,8 +92,14 @@ std::tuple<at::Tensor, at::Tensor> forward(
                 "Invalid sequence metadata layout");
     const int batch = seq_k.numel();
     TORCH_CHECK(batch > 0 && cu_q.numel() == batch + 1 && table.size(0) == batch, "Invalid batch metadata");
-    TORCH_CHECK(max_q > 0 && max_q <= 2048 && max_k > 0 && max_k <= 262144
-                && q.size(0) <= batch * max_q, "Sequence bounds exceed this port's supported envelope");
+    // Q is tiled in blocks of 64; 2048 was a validation limit, not a kernel
+    // dimension. Accept queries across the same context envelope as K. Long
+    // prefill uses splits=1, so its workspace does not grow with padded batches.
+    TORCH_CHECK(max_q > 0 && max_q <= max_context_tokens && max_k > 0 && max_k <= max_context_tokens
+                && q.size(0) <= int64_t(batch) * max_q
+                && q.size(0) <= std::numeric_limits<int>::max(),
+                "Sequence bounds exceed the ", max_context_tokens, "-token context envelope: max_q=",
+                max_q, ", max_k=", max_k, ", tokens=", q.size(0), ", batch=", batch);
     TORCH_CHECK(table.size(1) >= (max_k + k.size(1) - 1) / k.size(1), "Block table is too short");
     TORCH_CHECK(k_scale.scalar_type() == at::kFloat && v_scale.scalar_type() == at::kFloat
                 && k_scale.numel() == 1 && v_scale.numel() == 1, "Only per-tensor float32 KV scales are supported");
@@ -182,6 +190,7 @@ std::tuple<at::Tensor, at::Tensor> forward(
 }  // namespace fa2_fp8kv
 
 TORCH_LIBRARY(fa2_fp8kv, m) {
+    m.def("max_query_tokens() -> int", []() { return fa2_fp8kv::max_context_tokens; });
     m.def("forward(Tensor q, Tensor k, Tensor v, Tensor(a!) out, Tensor cu_q, Tensor seq_k, Tensor table, Tensor k_scale, Tensor v_scale, int max_q, int max_k, bool causal, int window_left, int window_right, float softmax_scale, int splits=0, bool pack_gqa=False) -> (Tensor(a!), Tensor)");
 }
 TORCH_LIBRARY_IMPL(fa2_fp8kv, CUDA, m) {

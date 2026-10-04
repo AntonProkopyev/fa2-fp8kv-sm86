@@ -98,24 +98,36 @@ class MixedPrefill(unittest.TestCase):
         impl.dcp_world_size = impl.pcp_world_size = 1
         calls = []
 
-        def bounded_operation(q, k, v, out, cu_q, seq_k, pages, ks, vs,
+        def reference_operation(q, k, v, out, cu_q, seq_k, pages, ks, vs,
                               max_q, max_k, causal, left, right, scale, splits, grouped):
-            self.assertLessEqual(max_q, 2048, "kernel envelope exceeded")
             self.assertTrue(causal)
             self.assertEqual(left, -1)
             self.assertLessEqual(int(seq_k.max()), max_k)
-            calls.append((q.shape[0], seq_k.tolist()))
             out.copy_(reference(q, k, v, pages, seq_k, cu_q.tolist(), Scales(ks, vs), scale))
             return out, torch.empty(0)
+
+        operation = reference_operation if device == "cpu" else torch.ops.fa2_fp8kv.forward
+
+        def batched_operation(q, k, v, out, cu_q, seq_k, pages, ks, vs,
+                              max_q, max_k, causal, left, right, scale, splits, grouped):
+            # Splitting in Python would pass numerical comparisons but lose
+            # batched dispatch and replay of GPU query boundaries.
+            self.assertEqual(q.shape[0], starts[-1])
+            self.assertEqual(pages.shape[0], len(queries))
+            self.assertEqual(max_q, max(queries))
+            calls.append((q.shape[0], max_q))
+            return operation(q, k, v, out, cu_q, seq_k, pages, ks, vs,
+                             max_q, max_k, causal, left, right, scale, splits, grouped)
 
         with ExitStack() as stack:
             if device == "cpu":
                 stack.enter_context(patch.object(backend, "extension_selected", return_value=True))
                 stack.enter_context(patch.object(torch.cuda, "is_current_stream_capturing", return_value=capture))
-                stack.enter_context(patch.object(torch.ops.fa2_fp8kv, "forward", bounded_operation, create=True))
+            stack.enter_context(patch.object(torch.ops.fa2_fp8kv, "forward", batched_operation, create=True))
             if oom:
                 stack.enter_context(patch.object(backend.Fa2Prefill, "forward", side_effect=torch.OutOfMemoryError))
             impl.forward(scales, query, query, query, cache, metadata, output)
+            self.assertEqual(len(calls), 1)
             if capture and device == "cuda":
                 stream = torch.cuda.Stream()
                 stream.wait_stream(torch.cuda.current_stream())
@@ -127,6 +139,9 @@ class MixedPrefill(unittest.TestCase):
                 with torch.cuda.graph(graph):
                     impl.forward(scales, query, query, query, cache, metadata, output)
                 lengths.sub_(1)
+                if max(queries) > 2048 and len(queries) > 1:
+                    starts[1] = 8
+                    metadata.query_start_loc[1] = 8
                 graph.replay()
         expected = reference(query[:starts[-1]], keys, values, table, lengths, starts, scales, impl.scale)
         torch.testing.assert_close(output[:starts[-1]], expected, atol=0.025, rtol=0.025)
@@ -167,6 +182,9 @@ class MixedPrefill(unittest.TestCase):
         calls = self.run_batch((1, 8), capture=True)
         if self.device == "cpu":
             self.assertEqual(len(calls), 1)
+
+    def test_mixed_capture_replays_gpu_boundaries(self):
+        self.run_batch((1, 4097), capture=True)
 
 
 if __name__ == "__main__":

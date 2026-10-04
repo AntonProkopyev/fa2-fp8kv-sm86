@@ -65,6 +65,7 @@ manifest = {
             "machine": platform.machine(), "system": platform.system(),
             "cxx11_abi": torch._C._GLIBCXX_USE_CXX11_ABI},
     "compiled_sm": ["8.6", "8.9", "12.0"],
+    "max_query_tokens": torch.ops.fa2_fp8kv.max_query_tokens(),
     "build_provenance": {"vllm": importlib.metadata.version("vllm"),
                          "flashinfer_headers": importlib.metadata.version("flashinfer-python"),
                          "cutlass": CUTLASS,

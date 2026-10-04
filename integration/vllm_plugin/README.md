@@ -41,19 +41,24 @@ Do not combine that overlay with this plugin.
 
 ## Long prefill with concurrent requests
 
-The paged FP8 operator accepts at most 2048 query tokens per request per
-call. For full causal attention, the adapter splits longer mixed batches
-into per-request chunks within that limit. It keeps the original request
-order, block-table rows, and causal positions. The scheduler's batch budget
-and prefill threshold do not need to be lowered for this path.
+The paged FP8 operator accepts queries through its 262144-token context
+envelope. The former 2048 bound was a validation restriction in the C++
+entrypoint, not a kernel tile dimension: each CUDA block processes 64 query
+rows and the grid covers the longest query. Long prefill uses one KV split,
+so it does not allocate the padded split-KV accumulation buffers.
 
-Query boundaries come from vLLM's CPU metadata. Context lengths stay on the
-GPU: the CPU upper bound can include rejected speculative tokens on decode
-rows. Each chunk subtracts only the query tokens after it from the exact
-GPU context length. Empty rows are skipped. Batches within the kernel limit
-and the existing single-request native FA2 prefill route retain their paths.
-This change does not extend long-query support to sliding-window,
-noncausal, or full CUDA Graph prefill execution.
+Mixed batches use one operator call with the original GPU query boundaries,
+sequence lengths and block table. The Python query-chunk loop introduced in
+v0.1.0 is removed. Exact GPU lengths avoid optimistic CPU context bounds for
+speculative decode. The single-request bounded BF16 prefill optimization
+remains; on workspace OOM it falls through to the same batched paged operator.
+
+Long queries also work in the operator's sliding-window/noncausal paths and
+CUDA Graph replay. vLLM retains its own graph eligibility policy; supporting
+the operator in a graph does not change which model steps vLLM captures.
+The artifact manifest records `max_query_tokens` by querying the compiled
+operator. Consumers can remove their old 2048 scheduler clamp for that
+verified artifact and retain it for older images without the capability.
 
 Run the routing regression without GPU access in the pinned plugin image:
 
@@ -67,10 +72,9 @@ docker run --rm --runtime runc --network none \
   check_mixed_prefill.py -v
 ```
 
-The CPU run substitutes an FP32 reference for the CUDA operator and enforces
-its 2048-token query limit. It tests adapter routing and causal chunk offsets;
-it does not validate CUDA numerics or graph execution. Five regression cases
-fail on the original adapter and all eight CPU checks pass with the fix.
+The CPU run substitutes an FP32 reference for the CUDA operator and asserts
+that every request reaches it in one batched call. It does not validate CUDA
+numerics or graph execution. GPU regressions exercise the actual operator.
 
 In a matching vLLM 0.29 CUDA environment with the existing libraries built
 and `FA2_FP8KV_LIBRARY` / `FA2_FP8KV_PREFILL_LIBRARY` set, run:
@@ -79,14 +83,16 @@ and `FA2_FP8KV_LIBRARY` / `FA2_FP8KV_PREFILL_LIBRARY` set, run:
 export PYTHONPATH="$PWD:$PWD/integration/vllm_plugin${PYTHONPATH:+:$PYTHONPATH}"
 python3 check_mixed_prefill.py --device cuda -v
 python3 check_backend.py
+python3 check_full.py --library build-pipeline/fa2_fp8kv.so --full --long-query
+python3 check_replay.py build-pipeline/fa2_fp8kv.so --long-query
 ```
 
-The CUDA mode uses the real operators and adds a 262143-token context case
-and decode graph replay with changed GPU sequence lengths. Both modes check
-mixed request ordering, two long prefills, an empty row, the 2048/2049
-boundary, missing CPU context bounds, OOM fallback, non-unit KV scales, and
-strided outputs with padding guards. On October 4, 2026, all nine CUDA checks
-passed on each RTX 3090 in the pinned vLLM 0.29 image. They also passed in
-vLLM 0.30.0, together with `check_backend.py`. The previous artifact failed
-six of the same CUDA cases with the sequence-envelope error. See
-`BENCHMARKS.md` for the validation scope. No throughput improvement is claimed.
+Coverage includes mixed request order, two long prefills, empty rows,
+2048/2049 boundaries, queries up to 262144, non-unit scales, strided buffers,
+OOM fallback, and graph replay with changing GPU query boundaries and lengths.
+`check_full.py --library build-pipeline/fa2_fp8kv.so --large-workspace`
+separately tests 64-bit offsets with more than 2^31 FP32 scratch elements;
+it needs about 9 GiB of free VRAM. `bench_mixed.py` compares native batching
+with the v0.1.0 workaround using three warmups and five measured runs.
+These operation timings are not model throughput. See `BENCHMARKS.md` for
+measured results and remaining validation limits.

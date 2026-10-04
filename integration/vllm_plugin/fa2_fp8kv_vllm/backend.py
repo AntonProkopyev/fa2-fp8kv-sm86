@@ -6,7 +6,6 @@ from typing import ClassVar
 
 import torch
 from fa2_prefill import Fa2Prefill
-from paged_prefill import PagedPrefill
 from vllm.config import get_current_vllm_config
 from vllm.platforms import current_platform
 from vllm.v1.attention.backend import AttentionImpl, AttentionType
@@ -28,7 +27,6 @@ if current_platform.get_device_capability() in ((8, 6), (8, 9), (12, 0)):
 class Fp8Metadata(native.FlashAttentionMetadata):
     prefill_context: int = 0
     maximum_context: int = 0
-    prefill_query_starts: tuple[int, ...] = ()
 
 
 class Fp8MetadataBuilder(native.FlashAttentionMetadataBuilder):
@@ -41,12 +39,8 @@ class Fp8MetadataBuilder(native.FlashAttentionMetadataBuilder):
         if (common.causal and common.max_query_len > 64 and common.num_reqs == 1
                 and common.seq_lens_cpu_upper_bound is not None):
             context = int(common.seq_lens_cpu_upper_bound[0].item())
-        query_starts = ()
-        if common.causal and common.max_query_len > 2048:
-            query_starts = tuple(common.query_start_loc_cpu[:common.num_reqs + 1].tolist())
         return Fp8Metadata(**vars(metadata), prefill_context=context,
-                           maximum_context=self.model_config.max_model_len,
-                           prefill_query_starts=query_starts)
+                           maximum_context=self.model_config.max_model_len)
 
     def use_cascade_attention(self, *args, **kwargs):
         return False
@@ -106,19 +100,8 @@ class Fp8Attention(AttentionImpl[Fp8Metadata]):
                 return output
             except torch.OutOfMemoryError:
                 native.logger.warning_once("FP8 FA2 prefill workspace exhausted; using paged FA2")
-            PagedPrefill().forward(query[:count], keys, values,
-                attn_metadata.block_table, layer._k_scale, layer._v_scale,
-                attn_metadata.prefill_context, self.scale, output[:count])
-            return output
         maximum = min(attn_metadata.maximum_context,
                       attn_metadata.block_table.shape[1] * keys.shape[1])
-        if (attn_metadata.prefill_query_starts and attn_metadata.causal
-                and window_left == -1 and not torch.cuda.is_current_stream_capturing()):
-            PagedPrefill().forward_batch(query[:count], keys, values,
-                attn_metadata.block_table, layer._k_scale, layer._v_scale,
-                attn_metadata.prefill_query_starts, attn_metadata.seq_lens,
-                maximum, self.scale, output[:count])
-            return output
         grouped = (attn_metadata.causal and window_left == -1
                    and max_query * (query.shape[1] // kv_heads) <= 64)
         splits = (128 if attn_metadata.causal else 32) if max_query <= 64 else 1

@@ -8,6 +8,7 @@ import torch
 
 parser = argparse.ArgumentParser()
 parser.add_argument("library")
+parser.add_argument("--long-query", action="store_true")
 args = parser.parse_args()
 torch.ops.load_library(args.library)
 torch.cuda.set_device(0)
@@ -16,35 +17,37 @@ torch.set_float32_matmul_precision("highest")
 torch.manual_seed(83)
 
 with torch.inference_mode():
-    query = torch.randn((5, 8, 256), device="cuda", dtype=torch.bfloat16)
+    tokens = 4101 if args.long_query else 5
+    max_query = tokens - 1
+    query = torch.randn((tokens, 8, 256), device="cuda", dtype=torch.bfloat16)
     # Noncontiguous block strides with aligned, contiguous rows.
     keys = torch.randn((9, 2, 16, 1, 256), device="cuda", dtype=torch.bfloat16).to(torch.float8_e4m3fn)[:, 0]
     values = torch.randn((9, 2, 16, 1, 256), device="cuda", dtype=torch.bfloat16).to(torch.float8_e4m3fn)[:, 0]
     table = torch.tensor([[2, 1, 0], [5, 4, 3], [8, 7, 6]], device="cuda", dtype=torch.int32)
-    cu_q = torch.tensor([0, 1, 5, 5], device="cuda", dtype=torch.int32)
+    cu_q = torch.tensor([0, 1, tokens, tokens], device="cuda", dtype=torch.int32)
     seq_k = torch.tensor([17, 31, 0], device="cuda", dtype=torch.int32)
     k_scale = torch.tensor([0.5], device="cuda")
     v_scale = torch.tensor([1.75], device="cuda")
-    for grouped in (False, True):
-        for splits in (1, 4, 128):
-            guarded = torch.full((7, 2, 8, 256), 11, device="cuda", dtype=torch.bfloat16)
+    for grouped in ((False,) if args.long_query else (False, True)):
+        for splits in ((1, 4) if args.long_query else (1, 4, 128)):
+            guarded = torch.full((tokens + 2, 2, 8, 256), 11, device="cuda", dtype=torch.bfloat16)
             output = guarded[1:-1, 0]
             for _ in range(3):
                 torch.ops.fa2_fp8kv.forward(
                     query, keys, values, output, cu_q, seq_k, table, k_scale, v_scale,
-                    4, 48, True, -1, -1, 1 / 16, splits, grouped,
+                    max_query, 48, True, -1, -1, 1 / 16, splits, grouped,
                 )
             torch.cuda.synchronize()
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
                 _, captured_lse = torch.ops.fa2_fp8kv.forward(
                     query, keys, values, output, cu_q, seq_k, table, k_scale, v_scale,
-                    4, 48, True, -1, -1, 1 / 16, splits, grouped,
+                    max_query, 48, True, -1, -1, 1 / 16, splits, grouped,
                 )
             for lengths, starts, rotate in [
-                ([17, 31, 0], [0, 1, 5, 5], False),
-                ([23, 37, 0], [0, 3, 5, 5], True),
-                ([17, 31, 0], [0, 1, 5, 5], False),
+                ([17, 31, 0], [0, 1, tokens, tokens], False),
+                ([23, 37, 0], [0, 2049 if args.long_query else 3, tokens, tokens], True),
+                ([17, 31, 0], [0, 1, tokens, tokens], False),
             ]:
                 cu_q.copy_(torch.tensor(starts, device="cuda", dtype=torch.int32))
                 seq_k.copy_(torch.tensor(lengths, device="cuda", dtype=torch.int32))
@@ -66,8 +69,10 @@ with torch.inference_mode():
                         n - count + torch.arange(count, device="cuda")[:, None]
                     )
                     scores.masked_fill_(mask[None], -torch.inf)
-                    expected.append(torch.einsum("hqk,kd->qhd", scores.softmax(-1), v))
-                    expected_lse.append(scores.logsumexp(-1))
+                    valid = (~mask).any(dim=-1)
+                    weights = torch.where(valid[None, :, None], scores.softmax(-1), 0)
+                    expected.append(torch.einsum("hqk,kd->qhd", weights, v))
+                    expected_lse.append(torch.where(valid[None, :], scores.logsumexp(-1), torch.inf))
                 reference = torch.cat(expected).bfloat16()
                 torch.testing.assert_close(output, reference, atol=0.025, rtol=0.025)
                 torch.testing.assert_close(captured_lse, torch.cat(expected_lse, dim=1), atol=0.025, rtol=0.005)
