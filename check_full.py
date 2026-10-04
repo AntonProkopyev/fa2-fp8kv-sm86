@@ -186,6 +186,7 @@ if args.long_query:
         PagedCase('long-leading-mask', 256, 6, 1, (1, 4097), (31, 1001), 16, True),
         PagedCase('query-16384', 128, 1, 1, (16384,), (16384,), 256, True),
         PagedCase('query-262144', 128, 1, 1, (1, 262144), (3, 1), 16, True),
+        PagedCase('dense-query-context-262144', 128, 1, 1, (1, 262144), (3, 262144), 256, True),
         PagedCase('long-query-long-context', 128, 4, 1, (1, 2049), (37, 262144), 256, True),
     ]
 if args.case:

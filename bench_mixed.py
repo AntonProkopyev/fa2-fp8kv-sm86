@@ -46,8 +46,12 @@ def measure(mode, queries, context, dim, heads, kv_heads):
                     table[row:row + 1], key_scale, value_scale, size, context,
                     True, -1, -1, dim ** -0.5, 1, False)
 
+    # Each of the 3 warmup / 5 measured samples contains enough work to avoid
+    # clock ramp and Python scheduling dominating the shortest operation.
+    iterations = 64 if context <= 4096 else 4 if context <= 32768 else 1
     for _ in range(3):
-        forward()
+        for _ in range(iterations):
+            forward()
     torch.cuda.synchronize()
     torch.cuda.reset_peak_memory_stats()
     allocated = torch.cuda.memory_allocated()
@@ -56,15 +60,17 @@ def measure(mode, queries, context, dim, heads, kv_heads):
         begin, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
         wall = time.perf_counter()
         begin.record()
-        forward()
+        for _ in range(iterations):
+            forward()
         end.record()
         end.synchronize()
-        wall_ms.append((time.perf_counter() - wall) * 1000)
-        gpu_ms.append(begin.elapsed_time(end))
+        wall_ms.append((time.perf_counter() - wall) * 1000 / iterations)
+        gpu_ms.append(begin.elapsed_time(end) / iterations)
     return {"gpu": os.environ.get("CUDA_VISIBLE_DEVICES", "0"),
             "mode": mode, "queries": queries, "context": context,
             "dim": dim, "heads": heads, "kv_heads": kv_heads,
-            "warmups": 3, "runs": 5, "gpu_ms": gpu_ms, "wall_ms": wall_ms,
+            "warmups": 3, "runs": 5, "iterations_per_sample": iterations,
+            "gpu_ms": gpu_ms, "wall_ms": wall_ms,
             "gpu_mean_ms": statistics.mean(gpu_ms),
             "wall_mean_ms": statistics.mean(wall_ms),
             "peak_allocated_mib": torch.cuda.max_memory_allocated() / 2**20,
