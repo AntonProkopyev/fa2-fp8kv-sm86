@@ -1,5 +1,63 @@
 # Measurements
 
+## Native long-query candidate — 2026-10-04
+
+Source: `ab2dff17a5719d4dd1d56c19f9ce58a1b80d3006`; package 0.1.1.
+Image: `ghcr.io/antonprokopyev/fa2-fp8kv-sm86@sha256:709357b6f339e1539c0fa197e6f78f98b17506accb8a67e5cf0716d173ad7d0d`.
+Artifact ID: `edc98c61f3dfd525cee975cdf5cf67e377398ea77b845ed3ac894e001ddc2766`.
+
+The 2048-query restriction was an entrypoint validation bound. The CUDA
+kernel already tiles Q in blocks of 64 and sizes the launch grid from max_q.
+Queries now cover the existing 262144-token context envelope. Mixed batches
+use one operator call with GPU boundaries and lengths; the v0.1.0 Python
+query-chunk loop is removed. Empty causal tiles now use packed LSE offsets
+in ragged unsplit batches. Split-workspace products are widened before
+multiplication, preventing overflow above 2^31 FP32 elements.
+
+The final artifact passed the full documented GPU suite on each RTX 3090:
+26 direct numerical cases, normal and long-query graph replay, window tests,
+native/paged prefill, ten plugin regressions, and backend checks. Coverage
+includes full Q=K=262144, empty rows, strided buffers, non-unit scales, and
+graph replay with changing GPU query boundaries, lengths and pages within
+captured capacities. The installed wheel also passes the plugin/backend
+checks with vLLM 0.30.0. The build ABI remains PyTorch 2.13.0+cu130 / CUDA 13.0.
+
+Development checks additionally passed an 8258.2 MiB split-workspace case
+and Compute Sanitizer for mixed Q=2049 and the previously broken masked-row
+LSE path (zero errors). The full Q=K=262144 FP32 reference comparison used
+1198.2 MiB peak PyTorch allocation. The old binary rejects Q=2049 and fails
+the short ragged masked-row LSE comparison.
+
+### Operation timing against the v0.1.0 workaround
+
+`bench_mixed.py` uses identical seeded BF16 Q / FP8 E4M3 KV, D=256, Hq=12,
+Hkv=2 and non-unit scales. Each arm uses three warmup samples and five
+measured samples. Samples contain 64 operations at K=4096, four at K=32768,
+and one at K=131072; values below are per operation. This avoids clock ramp
+dominating short samples. CUDA events include gaps between launches, so the
+comparison includes the old Python loop's dispatch/metadata overhead.
+
+The accepted run sampled GPU process ownership and GPU state every 500 ms;
+no foreign GPU processes were observed in its 83 samples. Earlier runs with
+possible concurrent workloads are excluded. Both cards had a 250 W limit.
+Numbers identify CUDA-visible device indices within the test container.
+
+| Q lengths | K per request | GPU 0 chunked → direct (ms) | GPU 1 chunked → direct (ms) |
+|---|---:|---:|---:|
+| 1, 2049 | 4096 | 4.252 → 3.125 | 4.295 → 3.148 |
+| 1, 4096 | 32768 | 58.538 → 53.872 | 59.075 → 54.458 |
+| 4096, 4096 | 32768 | 107.592 → 104.840 | 108.517 → 105.669 |
+| 8, 8192 | 131072 | 461.545 → 431.004 | 464.659 → 433.310 |
+
+Within-arm CV was 0.10–1.71% on device 0 and 0.07–0.87% on device 1.
+Direct batching reduced measured operation time by 26.5–26.7% for the short
+case and 2.6–8.0% for the longer cases. Extra live PyTorch allocation for
+the direct call was 0.094–0.375 MiB in these fixtures, versus about 0.095 MiB
+for chunking. These are operation measurements, not a model TPS claim.
+
+Live model validation of this candidate is recorded separately below once
+complete. Previous v0.1.0 serving measurements do not validate this kernel.
+
 ## Mixed causal prefill validation — 2026-10-04
 
 Artifact source: `7646a2d8a8d903847d81f506c6a0d26bc212c97f`.
