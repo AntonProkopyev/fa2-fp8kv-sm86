@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Split long full-causal prefill in mixed vLLM 0.29 batches into per-request
+  paged calls of at most 2048 query tokens. Preserve causal offsets and exact
+  GPU context lengths, including concurrent speculative decode. Add CPU
+  routing regressions and an optional CUDA numerical/graph check. GPU and
+  model validation of this change remain pending.
+
 ## 2026-09-12
 
 - Use model-neutral `fa2_fp8kv` library and operator names, and
