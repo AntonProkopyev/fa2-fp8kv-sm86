@@ -1,5 +1,24 @@
 # Prebuilt kernel artifacts
 
+## 0.1.1 native long-query candidate — 2026-10-04
+
+```text
+ghcr.io/antonprokopyev/fa2-fp8kv-sm86:vllm-0.29-ab2dff1@sha256:709357b6f339e1539c0fa197e6f78f98b17506accb8a67e5cf0716d173ad7d0d
+```
+
+Artifact ID: `edc98c61f3dfd525cee975cdf5cf67e377398ea77b845ed3ac894e001ddc2766`.
+Source revision: `ab2dff17a5719d4dd1d56c19f9ce58a1b80d3006`.
+The wheel contains the native mixed-batch path. The compiled library exports
+`max_query_tokens()`, and the build records its value, 262144, in the manifest.
+Consumers must verify the manifest and payload before using that capability
+to remove a legacy 2048 scheduler clamp. Older artifacts omit the field and
+retain the legacy fallback. The KV context bound is unchanged.
+
+The final artifact passed the GPU suite on both RTX 3090s, including full
+Q=K=262144 and long-query graph replay. vLLM 0.29 and 0.30 adapter checks pass.
+See BENCHMARKS.md for operation timings and model validation scope. No
+SM89/SM120 runtime validation is implied by compilation.
+
 ## 0.1.0 mixed-prefill fix — 2026-10-04
 
 ```text

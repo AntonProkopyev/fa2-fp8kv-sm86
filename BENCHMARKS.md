@@ -71,6 +71,12 @@ Complete model validation remains pending a free GPU window; the partial
 verify-full run is not counted as a pass. Previous v0.1.0 serving results
 also do not validate this kernel.
 
+A later isolated boot passed verify-full, including vision 4/4, with the same
+configuration. MTP acceptance was skipped because SPEC_N=0. Its log completed
+at 11:29:21 UTC, before the first foreign GPU sample at 11:31:10. That resumed
+workload interrupted stress; stress and the canonical model benchmark remain
+pending. The completed functional gate does not need to be repeated.
+
 ## Mixed causal prefill validation — 2026-10-04
 
 Artifact source: `7646a2d8a8d903847d81f506c6a0d26bc212c97f`.
