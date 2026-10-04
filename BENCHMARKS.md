@@ -55,8 +55,21 @@ case and 2.6–8.0% for the longer cases. Extra live PyTorch allocation for
 the direct call was 0.094–0.375 MiB in these fixtures, versus about 0.095 MiB
 for chunking. These are operation measurements, not a model TPS claim.
 
-Live model validation of this candidate is recorded separately below once
-complete. Previous v0.1.0 serving measurements do not validate this kernel.
+The actual club-3090 dual FP8 compose booted on vLLM 0.30 with TP=2,
+SPEC_N=0, context 98304, 4 GB KV/card, compilation/graphs enabled, two
+sequences, batch budget 8192 and threshold 4096. Its original entrypoint and
+`envelope.sh` were used; the verified manifest exported 262144 and the boot
+log retained threshold 4096. All three overlapping decode/prefill pairs
+completed with HTTP 200: 1500 output tokens and 5000 uncached input tokens
+per pair. Decode durations were 35.487/35.560/35.674 s; prefill request
+durations were 3.160/3.197/3.222 s. These are functional probes, not comparable
+to the older eager model runs below.
+
+The ownership monitor later stopped the test server when another GPU job
+started. The vision check was interrupted and stress/bench did not run.
+Complete model validation remains pending a free GPU window; the partial
+verify-full run is not counted as a pass. Previous v0.1.0 serving results
+also do not validate this kernel.
 
 ## Mixed causal prefill validation — 2026-10-04
 
