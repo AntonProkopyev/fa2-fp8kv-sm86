@@ -1,5 +1,23 @@
 # Prebuilt kernel artifacts
 
+## 0.1.0 mixed-prefill fix — 2026-10-04
+
+```text
+ghcr.io/antonprokopyev/fa2-fp8kv-sm86:vllm-0.29-7646a2d@sha256:ec26059d1c7a7eb4b4d916ddac495a0b937eae8e4594297f7ed625368c30cd7e
+```
+
+Artifact ID: `b0ce0370c7ca5c0d0e688e744f3665f3a099407fc2a38a4102d81eaaf5707a2d`.
+Source revision: `7646a2d8a8d903847d81f506c6a0d26bc212c97f`.
+Build this revision with the same Dockerfile and `SOURCE_REVISION` argument
+shown below. The image includes the mixed causal prefill adapter fix and
+retains the existing SM86/SM89/SM120 kernel targets. The installed wheel and
+CUDA libraries passed GPU regressions on both RTX 3090s with vLLM 0.29;
+adapter checks also passed on vLLM 0.30. Public digest pull without Docker
+credentials and checksum-verified extraction passed. Full scope and limits
+are recorded in `BENCHMARKS.md`.
+
+## Previous artifact — 2026-09-13
+
 The artifact image contains two CUDA libraries, the vLLM plugin wheel,
 checksums, an ABI manifest and license notices. It contains no model weights.
 Its entrypoint extracts the files into `/export/<artifact_id>` and exits.

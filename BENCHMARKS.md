@@ -1,5 +1,54 @@
 # Measurements
 
+## Mixed causal prefill validation — 2026-10-04
+
+Artifact source: `7646a2d8a8d903847d81f506c6a0d26bc212c97f`.
+Image: `ghcr.io/antonprokopyev/fa2-fp8kv-sm86@sha256:ec26059d1c7a7eb4b4d916ddac495a0b937eae8e4594297f7ed625368c30cd7e`.
+Artifact ID: `b0ce0370c7ca5c0d0e688e744f3665f3a099407fc2a38a4102d81eaaf5707a2d`.
+
+Hardware: two RTX 3090 cards, tested individually for the kernel checks.
+The host had kernel driver 595.71.05 with newer 595.91.07 userspace libraries.
+Tests used matching 595.71.05 userspace libraries from NVIDIA's official,
+SHA256-verified archive in isolated containers, with explicit GPU device
+mounts. System driver files and services were not changed.
+
+On each GPU, the artifact's installed wheel and CUDA libraries passed the
+following checks in the pinned vLLM 0.29.0 image:
+
+- `bench.py --check-only`: six numerical shapes.
+- `check_replay.py`: six configurations with three CUDA Graph replays each.
+- `check_window.py`: twelve sliding-window replay cases.
+- `check_full.py --full`: fifteen cases, including ragged/empty rows,
+  non-unit scales, strided buffers, and long contexts.
+- `check_prefill.py` with the paged library: six shapes and every finite
+  E4M3 byte; peak PyTorch allocation reported by this check was 3040.05 MiB
+  on each card.
+- `check_mixed_prefill.py --device cuda`: nine cases, including 262143-token
+  context and decode graph replay with changed sequence lengths.
+- `check_backend.py`: three native KV-write/attention cases with decode
+  graph replay.
+
+The old public artifact (`731d1942…`, source `0fa02cb`) failed six of the nine
+mixed-prefill CUDA cases with `Sequence bounds exceed this port's supported
+envelope`; the other three passed. The new artifact passed all nine under
+the same environment. The CPU oracle run passed eight cases and skipped the
+CUDA-only long-context case; five CPU cases failed before the fix.
+
+The installed artifact also passed all nine mixed-prefill CUDA cases and
+`check_backend.py` with vLLM 0.30.0, image digest
+`8a69ffad015f138d7170c4ddc429e230a3bc1c1719f67e14324749df200a4b90`.
+Both engine images use PyTorch 2.13.0+cu130 and CUDA 13.0.
+
+The club-3090 `dual/fp8/dflash2.yml` compose booted Qwen3.8-27B FP8 on both
+cards with vLLM 0.30.0 and the new artifact. Validation overrides were
+`SPEC_N=0`, context 98304, KV reservation 4000000000 bytes per card, and
+the isolated driver mounts above. `verify-full.sh` passed, including vision
+4/4. This is a no-drafter smoke check, not validation of the shipped
+262144-token DFlash2 configuration, TP=4/8, or SM89/SM120.
+
+No throughput improvement is claimed. Model stress and complete quality/soak
+validation are separate from these kernel and adapter results.
+
 Measured September 12, 2026 on two RTX 3090 GPUs (SM 8.6), PCIe P2P,
 no NVLink, 250 W power limits. Model: ornith-ai/Ornith-1.5-35B-A3B-FP8,
 revision fab11c26e2325a42f4b32da0249c819a0bade1b1.

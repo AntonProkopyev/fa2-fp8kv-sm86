@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0 — 2026-10-04
+
+- Split long full-causal prefill in mixed vLLM 0.29 batches into per-request
+  paged calls of at most 2048 query tokens. Preserve causal offsets and exact
+  GPU context lengths, including concurrent speculative decode. Add CPU
+  routing regressions and a CUDA numerical/graph check. All nine CUDA
+  regressions pass on both RTX 3090s with vLLM 0.29; vLLM 0.30 also passes
+  the adapter checks. The previous artifact fails six cases with the
+  sequence-envelope error. See BENCHMARKS.md for validation scope.
+
 ## 2026-09-12
 
 - Use model-neutral `fa2_fp8kv` library and operator names, and
