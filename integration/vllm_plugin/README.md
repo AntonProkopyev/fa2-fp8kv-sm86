@@ -85,6 +85,8 @@ The CUDA mode uses the real operators and adds a 262143-token context case
 and decode graph replay with changed GPU sequence lengths. Both modes check
 mixed request ordering, two long prefills, an empty row, the 2048/2049
 boundary, missing CPU context bounds, OOM fallback, non-unit KV scales, and
-strided outputs with padding guards. GPU and serving validation of this
-change remain pending; the available rig reported an NVML driver/library
-mismatch. No throughput improvement is claimed.
+strided outputs with padding guards. On October 4, 2026, all nine CUDA checks
+passed on each RTX 3090 in the pinned vLLM 0.29 image. They also passed in
+vLLM 0.30.0, together with `check_backend.py`. The previous artifact failed
+six of the same CUDA cases with the sequence-envelope error. See
+`BENCHMARKS.md` for the validation scope. No throughput improvement is claimed.
